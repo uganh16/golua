@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
@@ -44,7 +45,7 @@ type Proto struct {
 	NumParams       byte
 	IsVararg        bool
 	MaxStackSize    byte
-	Code            []uint32
+	Code            []vm.Instruction
 	Constants       []interface{}
 	Upvalues        []Upvalue
 	Protos          []*Proto

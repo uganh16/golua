@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/uganh16/golua/internal/binary"
+	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
@@ -66,7 +67,42 @@ func printCode(p *binary.Proto) {
 		if len(p.LineInfo) > pc {
 			line = fmt.Sprintf("%d", p.LineInfo[pc])
 		}
-		fmt.Printf("\t%d\t[%s]\t0x%08X\n", pc+1, line, i)
+		fmt.Printf("\t%d\t[%s]\t%-9s\t", pc+1, line, i.OpName())
+		switch i.OpMode() {
+		case vm.IABC:
+			a, b, c := i.ABC()
+			fmt.Printf("%d", a)
+			if i.BMode() != vm.OpArgN {
+				if b > 0xff {
+					fmt.Printf(" %d", -1-(b&0xff))
+				} else {
+					fmt.Printf(" %d", b)
+				}
+			}
+			if i.CMode() != vm.OpArgN {
+				if c > 0xff {
+					fmt.Printf(" %d", -1-(c&0xff))
+				} else {
+					fmt.Printf(" %d", c)
+				}
+			}
+		case vm.IABx:
+			a, bx := i.ABx()
+			fmt.Printf("%d", a)
+			switch i.BMode() {
+			case vm.OpArgK:
+				fmt.Printf(" %d", -1-bx)
+			case vm.OpArgU:
+				fmt.Printf(" %d", bx)
+			}
+		case vm.IAsBx:
+			a, sbx := i.AsBx()
+			fmt.Printf("%d %d", a, sbx)
+		case vm.IAx:
+			ax := i.Ax()
+			fmt.Printf("%d", -1-ax)
+		}
+		fmt.Printf("\n")
 	}
 }
 
