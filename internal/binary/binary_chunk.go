@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/uganh16/golua/internal/vm"
+	"github.com/uganh16/golua/internal/value"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
@@ -29,49 +29,13 @@ const (
 	LUAC_NUM = 370.5
 )
 
-const (
-	LUA_TNIL     = 0x00
-	LUA_TBOOLEAN = 0x01
-	LUA_TNUMFLT  = 0x03
-	LUA_TNUMINT  = 0x13
-	LUA_TSHRSTR  = 0x04
-	LUA_TLNGSTR  = 0x14
-)
-
-type Proto struct {
-	Source          string
-	LineDefined     uint32
-	LastLineDefined uint32
-	NumParams       byte
-	IsVararg        bool
-	MaxStackSize    byte
-	Code            []vm.Instruction
-	Constants       []interface{}
-	Upvalues        []Upvalue
-	Protos          []*Proto
-	LineInfo        []uint32
-	LocVars         []LocVar
-	UpvalueNames    []string
-}
-
-type Upvalue struct {
-	InStack byte
-	Idx     byte
-}
-
-type LocVar struct {
-	VarName string
-	StartPC uint32
-	EndPC   uint32
-}
-
 type bailout string
 
 func bailoutF(format string, a ...any) bailout {
 	return bailout(fmt.Sprintf(format, a...))
 }
 
-func Undump(file *os.File) (proto *Proto, err error) {
+func Undump(file *os.File) (proto *value.Proto, err error) {
 	defer func() {
 		switch x := recover().(type) {
 		case nil:

@@ -5,8 +5,10 @@ import (
 	"math"
 	"os"
 
+	"github.com/uganh16/golua/internal/value"
 	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
+	"github.com/uganh16/golua/pkg/lua/types"
 )
 
 type reader struct {
@@ -36,7 +38,7 @@ func (r *reader) checkHeader() binary.ByteOrder {
 	} else {
 		panic(bailoutF("corrupted"))
 	}
-	if r.readLuaNumber(order) != LUAC_NUM {
+	if r.readFloat64(order) != LUAC_NUM {
 		panic(bailoutF("float format mismatch in"))
 	}
 	return order
@@ -54,12 +56,12 @@ func (r *reader) checkSize(size byte, name string) {
 	}
 }
 
-func (r *reader) readProto(order binary.ByteOrder, parentSource string) *Proto {
+func (r *reader) readProto(order binary.ByteOrder, parentSource string) *value.Proto {
 	source := r.readString(order)
 	if source == "" {
 		source = parentSource
 	}
-	return &Proto{
+	return &value.Proto{
 		Source:          source,
 		LineDefined:     r.readUint32(order),
 		LastLineDefined: r.readUint32(order),
@@ -84,20 +86,20 @@ func (r *reader) readCode(order binary.ByteOrder) []vm.Instruction {
 	return code
 }
 
-func (r *reader) readConstants(order binary.ByteOrder) []interface{} {
-	constants := make([]interface{}, r.readUint32(order))
+func (r *reader) readConstants(order binary.ByteOrder) []value.LuaValue {
+	constants := make([]value.LuaValue, r.readUint32(order))
 	for i := range constants {
 		switch r.readByte() {
-		case LUA_TNIL:
-			constants[i] = nil
-		case LUA_TBOOLEAN:
-			constants[i] = r.readByte() != 0
-		case LUA_TNUMINT:
-			constants[i] = r.readLuaInteger(order)
-		case LUA_TNUMFLT:
-			constants[i] = r.readLuaNumber(order)
-		case LUA_TSHRSTR, LUA_TLNGSTR:
-			constants[i] = r.readString(order)
+		case types.LUA_TNIL:
+			constants[i] = value.Nil
+		case types.LUA_TBOOLEAN:
+			constants[i] = value.NewBoolean(r.readByte() != 0)
+		case value.LUA_TNUMINT:
+			constants[i] = value.NewInteger(int64(r.readUint64(order)))
+		case value.LUA_TNUMFLT:
+			constants[i] = value.NewNumber(r.readFloat64(order))
+		case value.LUA_TSHRSTR, value.LUA_TLNGSTR:
+			constants[i] = value.NewString(r.readString(order))
 		default:
 			panic(bailoutF("corrupted"))
 		}
@@ -105,10 +107,10 @@ func (r *reader) readConstants(order binary.ByteOrder) []interface{} {
 	return constants
 }
 
-func (r *reader) readUpvalues(order binary.ByteOrder) []Upvalue {
-	upvalues := make([]Upvalue, r.readUint32(order))
+func (r *reader) readUpvalues(order binary.ByteOrder) []value.Upvalue {
+	upvalues := make([]value.Upvalue, r.readUint32(order))
 	for i := range upvalues {
-		upvalues[i] = Upvalue{
+		upvalues[i] = value.Upvalue{
 			InStack: r.readByte(),
 			Idx:     r.readByte(),
 		}
@@ -116,8 +118,8 @@ func (r *reader) readUpvalues(order binary.ByteOrder) []Upvalue {
 	return upvalues
 }
 
-func (r *reader) readProtos(order binary.ByteOrder, parentSource string) []*Proto {
-	protos := make([]*Proto, r.readUint32(order))
+func (r *reader) readProtos(order binary.ByteOrder, parentSource string) []*value.Proto {
+	protos := make([]*value.Proto, r.readUint32(order))
 	for i := range protos {
 		protos[i] = r.readProto(order, parentSource)
 	}
@@ -132,10 +134,10 @@ func (r *reader) readLineInfo(order binary.ByteOrder) []uint32 {
 	return lineInfo
 }
 
-func (r *reader) readLocVars(order binary.ByteOrder) []LocVar {
-	locVars := make([]LocVar, r.readUint32(order))
+func (r *reader) readLocVars(order binary.ByteOrder) []value.LocVar {
+	locVars := make([]value.LocVar, r.readUint32(order))
 	for i := range locVars {
-		locVars[i] = LocVar{
+		locVars[i] = value.LocVar{
 			VarName: r.readString(order),
 			StartPC: r.readUint32(order),
 			EndPC:   r.readUint32(order),
@@ -152,11 +154,7 @@ func (r *reader) readUpvalueNames(order binary.ByteOrder) []string {
 	return upvalueNames
 }
 
-func (r *reader) readLuaInteger(order binary.ByteOrder) int64 {
-	return int64(r.readUint64(order))
-}
-
-func (r *reader) readLuaNumber(order binary.ByteOrder) float64 {
+func (r *reader) readFloat64(order binary.ByteOrder) float64 {
 	return math.Float64frombits(r.readUint64(order))
 }
 

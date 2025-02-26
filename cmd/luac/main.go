@@ -5,13 +5,14 @@ import (
 	"os"
 
 	"github.com/uganh16/golua/internal/binary"
+	"github.com/uganh16/golua/internal/value"
 	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
 func main() {
 	for _, file := range os.Args[1:] {
-		var p *binary.Proto
+		var p *value.Proto
 		f, err := os.Open(file)
 		if err == nil {
 			p, err = binary.Undump(f)
@@ -25,7 +26,7 @@ func main() {
 	}
 }
 
-func list(p *binary.Proto) {
+func list(p *value.Proto) {
 	printHeader(p)
 	printCode(p)
 	printDebug(p)
@@ -34,7 +35,7 @@ func list(p *binary.Proto) {
 	}
 }
 
-func printHeader(p *binary.Proto) {
+func printHeader(p *value.Proto) {
 	funcType := "main"
 	if p.LineDefined > 0 {
 		funcType = "function"
@@ -61,7 +62,7 @@ func printHeader(p *binary.Proto) {
 	fmt.Printf("%d%s param%s, %d slot%s, %d upvalue%s, %d local%s, %d constant%s, %d function%s\n", p.NumParams, varargFlag, s(int(p.NumParams)), p.MaxStackSize, s(int(p.MaxStackSize)), len(p.Upvalues), s(len(p.Upvalues)), len(p.LocVars), s(len(p.LocVars)), len(p.Constants), s(len(p.Constants)), len(p.Protos), s(len(p.Protos)))
 }
 
-func printCode(p *binary.Proto) {
+func printCode(p *value.Proto) {
 	for pc, i := range p.Code {
 		line := "-"
 		if len(p.LineInfo) > pc {
@@ -106,23 +107,10 @@ func printCode(p *binary.Proto) {
 	}
 }
 
-func printDebug(p *binary.Proto) {
+func printDebug(p *value.Proto) {
 	fmt.Printf("constants (%d):\n", len(p.Constants))
 	for i, k := range p.Constants {
-		s := "?"
-		switch k.(type) {
-		case nil:
-			s = "nil"
-		case bool:
-			s = fmt.Sprintf("%t", k)
-		case int64:
-			s = fmt.Sprintf("%d", k)
-		case float64:
-			s = fmt.Sprintf("%g", k)
-		case string:
-			s = fmt.Sprintf("%q", k)
-		}
-		fmt.Printf("\t%d\t%s\n", i+1, s)
+		fmt.Printf("\t%d\t%s\n", i+1, k)
 	}
 
 	fmt.Printf("locals (%d):\n", len(p.LocVars))
