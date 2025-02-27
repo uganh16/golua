@@ -2,6 +2,7 @@ package lua
 
 import (
 	"github.com/uganh16/golua/internal/state"
+	"github.com/uganh16/golua/pkg/lua/operators"
 	"github.com/uganh16/golua/pkg/lua/types"
 )
 
@@ -39,6 +40,12 @@ type LuaState interface {
 	ToStringX(idx int) (string, bool)
 
 	/**
+	 * comparison and arithmetic functions
+	 */
+	Arith(op operators.ArithOp)
+	Compare(idx1, idx2 int, op operators.CompareOp) bool
+
+	/**
 	 * push functions (Go -> stack)
 	 */
 	PushNil()
@@ -46,6 +53,12 @@ type LuaState interface {
 	PushInteger(i int64)
 	PushString(s string)
 	PushBoolean(b bool)
+
+	/**
+	 * miscellaneous functions
+	 */
+	Concat(n int)
+	Len(idx int)
 
 	/**
 	 * some useful macros

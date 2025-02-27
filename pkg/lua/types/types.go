@@ -14,6 +14,8 @@ const (
 	LUA_TFUNCTION
 	LUA_TUSERDATA
 	LUA_TTHREAD
+
+	LUA_NUMTAGS
 )
 
 type LuaType int

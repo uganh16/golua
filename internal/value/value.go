@@ -3,6 +3,7 @@ package value
 import (
 	"fmt"
 
+	"github.com/uganh16/golua/internal/number"
 	"github.com/uganh16/golua/pkg/lua/types"
 )
 
@@ -23,15 +24,19 @@ const (
 )
 
 type LuaValue interface {
-	Type() types.LuaType
+	Type() int
 	String() string
+}
+
+func NoVariantType(t int) types.LuaType {
+	return types.LuaType(t & 0x0f)
 }
 
 type luaNil struct{}
 
 var Nil luaNil
 
-func (luaNil) Type() types.LuaType {
+func (luaNil) Type() int {
 	return types.LUA_TNIL
 }
 
@@ -45,7 +50,11 @@ func NewBoolean(b bool) luaBoolean {
 	return luaBoolean(b)
 }
 
-func (luaBoolean) Type() types.LuaType {
+func AsBoolean(val LuaValue) bool {
+	return bool(val.(luaBoolean))
+}
+
+func (luaBoolean) Type() int {
 	return types.LUA_TBOOLEAN
 }
 
@@ -73,7 +82,11 @@ func NewNumber(n float64) luaNumber {
 	return luaNumber(n)
 }
 
-func (luaNumber) Type() types.LuaType {
+func AsNumber(val LuaValue) float64 {
+	return float64(val.(luaNumber))
+}
+
+func (luaNumber) Type() int {
 	return LUA_TNUMFLT
 }
 
@@ -87,7 +100,8 @@ func ToNumber(val LuaValue) (float64, bool) {
 		return float64(val), true
 	case luaInteger:
 		return float64(val), true
-	/* @todo string convertible to number? */
+	case luaString:
+		return number.ParseFloat(string(val))
 	default:
 		return 0.0, false
 	}
@@ -99,7 +113,11 @@ func NewInteger(i int64) luaInteger {
 	return luaInteger(i)
 }
 
-func (luaInteger) Type() types.LuaType {
+func AsInteger(val LuaValue) int64 {
+	return int64(val.(luaInteger))
+}
+
+func (luaInteger) Type() int {
 	return LUA_TNUMINT
 }
 
@@ -111,10 +129,17 @@ func ToInteger(val LuaValue) (int64, bool) {
 	switch val := val.(type) {
 	case luaInteger:
 		return int64(val), true
-	/* @todo try to convert a value to an integer */
-	default:
-		return 0, false
+	case luaNumber:
+		return number.FloatToInteger(float64(val))
+	case luaString:
+		if val, ok := number.ParseInteger(string(val)); ok {
+			return val, ok
+		}
+		if val, ok := number.ParseFloat(string(val)); ok {
+			return number.FloatToInteger(val)
+		}
 	}
+	return 0, false
 }
 
 type luaString string
@@ -123,7 +148,11 @@ func NewString(s string) luaString {
 	return luaString(s)
 }
 
-func (luaString) Type() types.LuaType {
+func AsString(val LuaValue) string {
+	return string(val.(luaString))
+}
+
+func (luaString) Type() int {
 	return types.LUA_TSTRING
 }
 
@@ -141,4 +170,95 @@ func ToString(val LuaValue) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func Equal(a, b LuaValue) bool {
+	switch a := a.(type) {
+	case luaNil:
+		return b == Nil
+	case luaBoolean:
+		b, ok := b.(luaBoolean)
+		return ok && a == b
+	case luaString:
+		b, ok := b.(luaString)
+		return ok && a == b
+	case luaInteger:
+		switch b := b.(type) {
+		case luaInteger:
+			return a == b
+		case luaNumber:
+			return luaNumber(a) == b
+		default:
+			return false
+		}
+	case luaNumber:
+		switch b := b.(type) {
+		case luaNumber:
+			return a == b
+		case luaInteger:
+			return a == luaNumber(b)
+		default:
+			return false
+		}
+	default:
+		return a == b
+	}
+}
+
+func LessThan(a, b LuaValue) (bool, bool) {
+	switch a := a.(type) {
+	case luaString:
+		if b, ok := b.(luaString); ok {
+			return a < b, true
+		}
+	case luaInteger:
+		switch b := b.(type) {
+		case luaInteger:
+			return a < b, true
+		case luaNumber:
+			return luaNumber(a) < b, true
+		}
+	case luaNumber:
+		switch b := b.(type) {
+		case luaNumber:
+			return a < b, true
+		case luaInteger:
+			return a < luaNumber(b), true
+		}
+	}
+	return false, false
+}
+
+func LessEqual(a, b LuaValue) (bool, bool) {
+	switch a := a.(type) {
+	case luaString:
+		if b, ok := b.(luaString); ok {
+			return a <= b, true
+		}
+	case luaInteger:
+		switch b := b.(type) {
+		case luaInteger:
+			return a <= b, true
+		case luaNumber:
+			return luaNumber(a) <= b, true
+		}
+	case luaNumber:
+		switch b := b.(type) {
+		case luaNumber:
+			return a <= b, true
+		case luaInteger:
+			return a <= luaNumber(b), true
+		}
+	}
+	return false, false
+}
+
+var typeNames = [...]string{"no value", "nil", "boolean", "userdata", "number", "string", "table", "function", "userdata", "thread"}
+
+func TypeName(t types.LuaType) string {
+	return typeNames[t+1]
+}
+
+func ValueTypeName(val LuaValue) string {
+	return TypeName(NoVariantType(val.Type()))
 }

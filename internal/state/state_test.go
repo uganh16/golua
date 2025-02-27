@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/uganh16/golua/pkg/lua/operators"
 	"github.com/uganh16/golua/pkg/lua/types"
 )
 
@@ -29,6 +30,26 @@ func TestStack(t *testing.T) {
 	L.Remove(-3)
 	printStack(L)
 	L.SetTop(-5)
+	printStack(L)
+}
+
+func TestLuaOp(t *testing.T) {
+	L := New()
+	L.PushInteger(1)
+	L.PushString("2.0")
+	L.PushString("3.0")
+	L.PushNumber(4.0)
+	printStack(L)
+
+	L.Arith(operators.LUA_OPADD)
+	printStack(L)
+	L.Arith(operators.LUA_OPBNOT)
+	printStack(L)
+	L.Len(2)
+	printStack(L)
+	L.Concat(3)
+	printStack(L)
+	L.PushBoolean(L.Compare(1, 2, operators.LUA_OPEQ))
 	printStack(L)
 }
 

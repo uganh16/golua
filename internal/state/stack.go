@@ -11,6 +11,18 @@ func (L *luaState) stackPush(val value.LuaValue) {
 	L.stack = append(L.stack, val)
 }
 
+func (L *luaState) stackPop() value.LuaValue {
+	top := len(L.stack)
+	if top == 0 {
+		panic("not enough elements in the stack")
+	}
+	top--
+	val := L.stack[top]
+	L.stack[top] = nil
+	L.stack = L.stack[:top]
+	return val
+}
+
 func (L *luaState) stackGet(idx int) (value.LuaValue, bool) {
 	top := len(L.stack)
 	if idx > 0 {
