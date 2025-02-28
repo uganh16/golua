@@ -1,6 +1,7 @@
-package value
+package closure
 
 import (
+	"github.com/uganh16/golua/internal/value"
 	"github.com/uganh16/golua/internal/vm"
 )
 
@@ -12,7 +13,7 @@ type Proto struct {
 	IsVararg        bool
 	MaxStackSize    byte
 	Code            []vm.Instruction
-	Constants       []LuaValue
+	Constants       []value.LuaValue
 	Upvalues        []Upvalue
 	Protos          []*Proto
 	LineInfo        []uint32

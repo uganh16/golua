@@ -2,10 +2,11 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
-	"github.com/uganh16/golua/pkg/lua/operators"
-	"github.com/uganh16/golua/pkg/lua/types"
+	"github.com/uganh16/golua/internal/vm"
+	"github.com/uganh16/golua/pkg/lua"
 )
 
 func TestStack(t *testing.T) {
@@ -41,27 +42,52 @@ func TestLuaOp(t *testing.T) {
 	L.PushNumber(4.0)
 	printStack(L)
 
-	L.Arith(operators.LUA_OPADD)
+	L.Arith(lua.OPADD)
 	printStack(L)
-	L.Arith(operators.LUA_OPBNOT)
+	L.Arith(lua.OPBNOT)
 	printStack(L)
 	L.Len(2)
 	printStack(L)
 	L.Concat(3)
 	printStack(L)
-	L.PushBoolean(L.Compare(1, 2, operators.LUA_OPEQ))
+	L.PushBoolean(L.Compare(1, 2, lua.OPEQ))
 	printStack(L)
+}
+
+func TestLuaVM(t *testing.T) {
+	L := New()
+	f, err := os.Open("../../test/sum.luac")
+	if err != nil {
+		return
+	}
+	L.Load(f, "", "b")
+	f.Close()
+
+	nRegs := int(L.proto.MaxStackSize)
+	L.CheckStack(nRegs + 8)
+	L.SetTop(nRegs)
+
+	for {
+		i := L.Fetch()
+		if i.Opcode() != vm.OP_RETURN {
+			i.Execute(L)
+			fmt.Printf("[%02d] %s ", L.pc, i.OpName())
+			printStack(L)
+		} else {
+			break
+		}
+	}
 }
 
 func printStack(L *luaState) {
 	for idx := 1; idx <= len(L.stack); idx++ {
 		t := L.Type(idx)
 		switch t {
-		case types.LUA_TBOOLEAN:
+		case lua.TBOOLEAN:
 			fmt.Printf("[%t]", L.ToBoolean(idx))
-		case types.LUA_TNUMBER:
+		case lua.TNUMBER:
 			fmt.Printf("[%g]", L.ToNumber(idx))
-		case types.LUA_TSTRING:
+		case lua.TSTRING:
 			fmt.Printf("[%q]", L.ToString(idx))
 		default:
 			fmt.Printf("[%s]", L.TypeName(t))

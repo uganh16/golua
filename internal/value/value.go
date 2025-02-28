@@ -4,23 +4,23 @@ import (
 	"fmt"
 
 	"github.com/uganh16/golua/internal/number"
-	"github.com/uganh16/golua/pkg/lua/types"
+	"github.com/uganh16/golua/pkg/lua"
 )
 
 /**
  * variant tags for strings
  */
 const (
-	LUA_TSHRSTR = types.LUA_TSTRING | (0 << 4)
-	LUA_TLNGSTR = types.LUA_TSTRING | (1 << 4)
+	LUA_TSHRSTR = lua.TSTRING | (0 << 4)
+	LUA_TLNGSTR = lua.TSTRING | (1 << 4)
 )
 
 /**
  * variant tags for numbers
  */
 const (
-	LUA_TNUMFLT = types.LUA_TNUMBER | (0 << 4)
-	LUA_TNUMINT = types.LUA_TNUMBER | (1 << 4)
+	LUA_TNUMFLT = lua.TNUMBER | (0 << 4)
+	LUA_TNUMINT = lua.TNUMBER | (1 << 4)
 )
 
 type LuaValue interface {
@@ -28,8 +28,8 @@ type LuaValue interface {
 	String() string
 }
 
-func NoVariantType(t int) types.LuaType {
-	return types.LuaType(t & 0x0f)
+func NoVariantType(t int) lua.Type {
+	return lua.Type(t & 0x0f)
 }
 
 type luaNil struct{}
@@ -37,7 +37,7 @@ type luaNil struct{}
 var Nil luaNil
 
 func (luaNil) Type() int {
-	return types.LUA_TNIL
+	return lua.TNIL
 }
 
 func (luaNil) String() string {
@@ -55,7 +55,7 @@ func AsBoolean(val LuaValue) bool {
 }
 
 func (luaBoolean) Type() int {
-	return types.LUA_TBOOLEAN
+	return lua.TBOOLEAN
 }
 
 func (b luaBoolean) String() string {
@@ -153,7 +153,7 @@ func AsString(val LuaValue) string {
 }
 
 func (luaString) Type() int {
-	return types.LUA_TSTRING
+	return lua.TSTRING
 }
 
 func (s luaString) String() string {
@@ -253,9 +253,16 @@ func LessEqual(a, b LuaValue) (bool, bool) {
 	return false, false
 }
 
+func Len(val LuaValue) (int, bool) {
+	if str, ok := val.(luaString); ok {
+		return len(str), true
+	}
+	return 0, false
+}
+
 var typeNames = [...]string{"no value", "nil", "boolean", "userdata", "number", "string", "table", "function", "userdata", "thread"}
 
-func TypeName(t types.LuaType) string {
+func TypeName(t lua.Type) string {
 	return typeNames[t+1]
 }
 

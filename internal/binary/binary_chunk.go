@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/uganh16/golua/internal/value"
+	"github.com/uganh16/golua/internal/value/closure"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
-const LUAC_VERSION = lua.LUA_VERSION_MAJOR*16 + lua.LUA_VERSION_MINOR
+const LUAC_VERSION = lua.VERSION_MAJOR*16 + lua.VERSION_MINOR
 
 /* this is the official format */
 const LUAC_FORMAT = 0
@@ -35,7 +35,7 @@ func bailoutF(format string, a ...any) bailout {
 	return bailout(fmt.Sprintf(format, a...))
 }
 
-func Undump(file *os.File) (proto *value.Proto, err error) {
+func Undump(file *os.File) (proto *closure.Proto, err error) {
 	defer func() {
 		switch x := recover().(type) {
 		case nil:

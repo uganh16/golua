@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"github.com/uganh16/golua/internal/value"
+	"github.com/uganh16/golua/internal/value/closure"
 	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
-	"github.com/uganh16/golua/pkg/lua/types"
 )
 
 type reader struct {
@@ -16,7 +16,7 @@ type reader struct {
 }
 
 func (r *reader) checkHeader() binary.ByteOrder {
-	r.checkLiteral(lua.LUA_SIGNATURE, "not a")
+	r.checkLiteral(lua.SIGNATURE, "not a")
 	if r.readByte() != LUAC_VERSION {
 		panic(bailoutF("version mismatch in"))
 	}
@@ -56,12 +56,12 @@ func (r *reader) checkSize(size byte, name string) {
 	}
 }
 
-func (r *reader) readProto(order binary.ByteOrder, parentSource string) *value.Proto {
+func (r *reader) readProto(order binary.ByteOrder, parentSource string) *closure.Proto {
 	source := r.readString(order)
 	if source == "" {
 		source = parentSource
 	}
-	return &value.Proto{
+	return &closure.Proto{
 		Source:          source,
 		LineDefined:     r.readUint32(order),
 		LastLineDefined: r.readUint32(order),
@@ -90,9 +90,9 @@ func (r *reader) readConstants(order binary.ByteOrder) []value.LuaValue {
 	constants := make([]value.LuaValue, r.readUint32(order))
 	for i := range constants {
 		switch r.readByte() {
-		case types.LUA_TNIL:
+		case lua.TNIL:
 			constants[i] = value.Nil
-		case types.LUA_TBOOLEAN:
+		case lua.TBOOLEAN:
 			constants[i] = value.NewBoolean(r.readByte() != 0)
 		case value.LUA_TNUMINT:
 			constants[i] = value.NewInteger(int64(r.readUint64(order)))
@@ -107,10 +107,10 @@ func (r *reader) readConstants(order binary.ByteOrder) []value.LuaValue {
 	return constants
 }
 
-func (r *reader) readUpvalues(order binary.ByteOrder) []value.Upvalue {
-	upvalues := make([]value.Upvalue, r.readUint32(order))
+func (r *reader) readUpvalues(order binary.ByteOrder) []closure.Upvalue {
+	upvalues := make([]closure.Upvalue, r.readUint32(order))
 	for i := range upvalues {
-		upvalues[i] = value.Upvalue{
+		upvalues[i] = closure.Upvalue{
 			InStack: r.readByte(),
 			Idx:     r.readByte(),
 		}
@@ -118,8 +118,8 @@ func (r *reader) readUpvalues(order binary.ByteOrder) []value.Upvalue {
 	return upvalues
 }
 
-func (r *reader) readProtos(order binary.ByteOrder, parentSource string) []*value.Proto {
-	protos := make([]*value.Proto, r.readUint32(order))
+func (r *reader) readProtos(order binary.ByteOrder, parentSource string) []*closure.Proto {
+	protos := make([]*closure.Proto, r.readUint32(order))
 	for i := range protos {
 		protos[i] = r.readProto(order, parentSource)
 	}
@@ -134,10 +134,10 @@ func (r *reader) readLineInfo(order binary.ByteOrder) []uint32 {
 	return lineInfo
 }
 
-func (r *reader) readLocVars(order binary.ByteOrder) []value.LocVar {
-	locVars := make([]value.LocVar, r.readUint32(order))
+func (r *reader) readLocVars(order binary.ByteOrder) []closure.LocVar {
+	locVars := make([]closure.LocVar, r.readUint32(order))
 	for i := range locVars {
-		locVars[i] = value.LocVar{
+		locVars[i] = closure.LocVar{
 			VarName: r.readString(order),
 			StartPC: r.readUint32(order),
 			EndPC:   r.readUint32(order),

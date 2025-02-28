@@ -5,14 +5,14 @@ import (
 	"os"
 
 	"github.com/uganh16/golua/internal/binary"
-	"github.com/uganh16/golua/internal/value"
+	"github.com/uganh16/golua/internal/value/closure"
 	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
 func main() {
 	for _, file := range os.Args[1:] {
-		var p *value.Proto
+		var p *closure.Proto
 		f, err := os.Open(file)
 		if err == nil {
 			p, err = binary.Undump(f)
@@ -26,7 +26,7 @@ func main() {
 	}
 }
 
-func list(p *value.Proto) {
+func list(p *closure.Proto) {
 	printHeader(p)
 	printCode(p)
 	printDebug(p)
@@ -35,7 +35,7 @@ func list(p *value.Proto) {
 	}
 }
 
-func printHeader(p *value.Proto) {
+func printHeader(p *closure.Proto) {
 	funcType := "main"
 	if p.LineDefined > 0 {
 		funcType = "function"
@@ -47,7 +47,7 @@ func printHeader(p *value.Proto) {
 	}
 	if source[0] == '@' || source[0] == '=' {
 		source = source[1:]
-	} else if source[0] == lua.LUA_SIGNATURE[0] {
+	} else if source[0] == lua.SIGNATURE[0] {
 		source = "(bstring)"
 	} else {
 		source = "(string)"
@@ -62,7 +62,7 @@ func printHeader(p *value.Proto) {
 	fmt.Printf("%d%s param%s, %d slot%s, %d upvalue%s, %d local%s, %d constant%s, %d function%s\n", p.NumParams, varargFlag, s(int(p.NumParams)), p.MaxStackSize, s(int(p.MaxStackSize)), len(p.Upvalues), s(len(p.Upvalues)), len(p.LocVars), s(len(p.LocVars)), len(p.Constants), s(len(p.Constants)), len(p.Protos), s(len(p.Protos)))
 }
 
-func printCode(p *value.Proto) {
+func printCode(p *closure.Proto) {
 	for pc, i := range p.Code {
 		line := "-"
 		if len(p.LineInfo) > pc {
@@ -107,7 +107,7 @@ func printCode(p *value.Proto) {
 	}
 }
 
-func printDebug(p *value.Proto) {
+func printDebug(p *closure.Proto) {
 	fmt.Printf("constants (%d):\n", len(p.Constants))
 	for i, k := range p.Constants {
 		fmt.Printf("\t%d\t%s\n", i+1, k)

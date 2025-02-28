@@ -1,18 +1,65 @@
 package lua
 
-import (
-	"github.com/uganh16/golua/internal/state"
-	"github.com/uganh16/golua/pkg/lua/operators"
-	"github.com/uganh16/golua/pkg/lua/types"
-)
-
 const (
-	LUA_VERSION_MAJOR = 5
-	LUA_VERSION_MINOR = 3
+	VERSION_MAJOR = 5
+	VERSION_MINOR = 3
 )
 
 /* mark for precompiled code ('<esc>Lua') */
-const LUA_SIGNATURE = "\x1bLua"
+const SIGNATURE = "\x1bLua"
+
+type Type int
+
+/**
+ * basic types
+ */
+const (
+	TNONE = iota - 1 // -1
+	TNIL
+	TBOOLEAN
+	TLIGHTUSERDATA
+	TNUMBER
+	TSTRING
+	TTABLE
+	TFUNCTION
+	TUSERDATA
+	TTHREAD
+
+	NUMTAGS
+)
+
+/* type of numbers in Lua */
+type Number = float64
+
+/* type for integer functions */
+type Integer = int64
+
+type ArithOp int
+
+const (
+	OPADD  ArithOp = iota // +
+	OPSUB                 // -
+	OPMUL                 // *
+	OPMOD                 // %
+	OPPOW                 // ^
+	OPDIV                 // /
+	OPIDIV                // //
+	OPBAND                // &
+	OPBOR                 // |
+	OPBXOR                // ~
+	OPSHL                 // <<
+	OPSHR                 // >>
+	OPUNM                 // - (unary minus)
+	OPBNOT                // ~
+)
+
+type CompareOp int
+
+const (
+	OPEQ CompareOp = iota // ==
+	OPLT                  // <
+	OPLE                  // <=
+)
 
 type LuaState interface {
 	/**
@@ -32,8 +79,8 @@ type LuaState interface {
 	IsNumber(idx int) bool
 	IsString(idx int) bool
 	IsInteger(idx int) bool
-	Type(idx int) types.LuaType
-	TypeName(t types.LuaType) string
+	Type(idx int) Type
+	TypeName(t Type) string
 	ToNumberX(idx int) (float64, bool)
 	ToIntegerX(idx int) (int64, bool)
 	ToBoolean(idx int) bool
@@ -42,8 +89,8 @@ type LuaState interface {
 	/**
 	 * comparison and arithmetic functions
 	 */
-	Arith(op operators.ArithOp)
-	Compare(idx1, idx2 int, op operators.CompareOp) bool
+	Arith(op ArithOp)
+	Compare(idx1, idx2 int, op CompareOp) bool
 
 	/**
 	 * push functions (Go -> stack)
@@ -74,12 +121,4 @@ type LuaState interface {
 	Insert(idx int)
 	Remove(idx int)
 	Replace(idx int)
-}
-
-/**
- * state manipulation
- */
-
-func NewState() LuaState {
-	return state.New()
 }
