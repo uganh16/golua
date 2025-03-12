@@ -2,9 +2,9 @@ package binary
 
 import (
 	"fmt"
-	"os"
+	"io"
 
-	"github.com/uganh16/golua/internal/value/closure"
+	"github.com/uganh16/golua/internal/bytecode"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
@@ -29,13 +29,56 @@ const (
 	LUAC_NUM = 370.5
 )
 
+/**
+ * variant tags for strings
+ */
+const (
+	LUA_TSHRSTR = lua.TSTRING | (0 << 4)
+	LUA_TLNGSTR = lua.TSTRING | (1 << 4)
+)
+
+/**
+ * variant tags for numbers
+ */
+const (
+	LUA_TNUMFLT = lua.TNUMBER | (0 << 4)
+	LUA_TNUMINT = lua.TNUMBER | (1 << 4)
+)
+
 type bailout string
 
 func bailoutF(format string, a ...any) bailout {
 	return bailout(fmt.Sprintf(format, a...))
 }
 
-func Undump(file *os.File) (proto *closure.Proto, err error) {
+type Proto struct {
+	Source          string
+	LineDefined     uint32
+	LastLineDefined uint32
+	NumParams       byte
+	IsVararg        bool
+	MaxStackSize    byte
+	Code            []bytecode.Instruction
+	Constants       []interface{}
+	Upvalues        []Upvalue
+	Protos          []*Proto
+	LineInfo        []uint32
+	LocVars         []LocVar
+	UpvalueNames    []string
+}
+
+type Upvalue struct {
+	InStack byte
+	Idx     byte
+}
+
+type LocVar struct {
+	VarName string
+	StartPC uint32
+	EndPC   uint32
+}
+
+func Undump(in io.Reader) (proto *Proto, err error) {
 	defer func() {
 		switch x := recover().(type) {
 		case nil:
@@ -47,7 +90,7 @@ func Undump(file *os.File) (proto *closure.Proto, err error) {
 		}
 	}()
 
-	r := &reader{file}
+	r := &reader{in}
 	order := r.checkHeader()
 	r.readByte() // size_upvalues
 	proto = r.readProto(order, "")

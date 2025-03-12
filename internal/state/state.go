@@ -2,62 +2,99 @@ package state
 
 import (
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/uganh16/golua/internal/binary"
-	"github.com/uganh16/golua/internal/value"
-	"github.com/uganh16/golua/internal/value/closure"
-	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
 /* extra stack space to handle TM calls and some other extras */
 const EXTRA_STACK = 5
 
+const BASIC_STACK_SIZE = 2 * lua.MINSTACK
+
+type callInfo struct {
+	cl   int       /* function index in the stack */
+	top  int       /* top for this function */
+	prev *callInfo /* dynamic call link */
+
+	/* only for Lua functions */
+	base int /* base for this function */
+	pc   int
+
+	nResults   int16 /* expected number of results from this function */
+	callStatus uint16
+}
+
+/**
+ * Bits in callInfo status
+ */
+const (
+	CIST_OAH    = 1 << iota /* original value of 'allowhook' */
+	CIST_LUA                /* call is running a Lua function */
+	CIST_HOOKED             /* call is running a debug hook */
+	CIST_FRESH              /* call is running on a fresh invocation */
+	CIST_YPCALL
+	CIST_TAIL
+	CIST_HOOKYIELD
+	CIST_LEQ
+	CIST_FIN
+)
+
 type luaState struct {
-	stack []value.LuaValue
-	proto *closure.Proto
-	pc    int
+	stack     []luaValue
+	stackLast int /* last free slot in the stack */
+	baseCI    callInfo
+	ci        *callInfo
 }
 
 func New() *luaState {
-	return &luaState{
-		stack: make([]value.LuaValue, 0, 20), // @todo
+	L := &luaState{
+		stack:     make([]luaValue, 1, BASIC_STACK_SIZE),
+		stackLast: BASIC_STACK_SIZE - EXTRA_STACK,
+		baseCI: callInfo{
+			cl:   0,
+			top:  1 + lua.MINSTACK,
+			prev: nil,
+		},
 	}
+	L.ci = &L.baseCI
+	return L
 }
 
 func (L *luaState) AbsIndex(idx int) int {
 	if idx > 0 {
 		return idx
 	}
-	return idx + len(L.stack) + 1 // @todo
+	// @todo pseudo
+	return len(L.stack) - L.ci.cl + idx
 }
 
 func (L *luaState) GetTop() int {
-	return len(L.stack) // @todo
+	return len(L.stack) - (L.ci.cl + 1)
 }
 
 func (L *luaState) SetTop(idx int) {
-	top := len(L.stack) // @todo
+	cl := L.ci.cl
+	var newTop int
 	if idx >= 0 {
-		if idx > cap(L.stack) {
+		if idx > L.stackLast-(cl+1) {
 			panic("new top too large")
 		}
-		for top < idx {
-			L.stack = append(L.stack, value.Nil)
-			top++
+		for len(L.stack) < (cl+1)+idx {
+			L.stack = append(L.stack, nil)
 		}
+		newTop = (cl + 1) + idx
 	} else {
-		if -(idx + 1) > top {
+		if -(idx + 1) > len(L.stack)-(cl+1) {
 			panic("invalid new top")
 		}
-		idx = top + idx + 1
+		newTop += len(L.stack) + idx + 1
 	}
-	for top > idx {
-		top--
-		L.stack[top] = nil
+	for i := newTop; i < len(L.stack); i++ {
+		L.stack[i] = nil
 	}
-	L.stack = L.stack[:top]
+	L.stack = L.stack[:newTop]
 }
 
 func (L *luaState) PushValue(idx int) {
@@ -66,9 +103,14 @@ func (L *luaState) PushValue(idx int) {
 }
 
 func (L *luaState) Rotate(idx, n int) {
-	t := len(L.stack) - 1    // end of stack segment being rotated
-	p := L.AbsIndex(idx) - 1 // start of segment
-	if p < 0 || p > t {
+	top := len(L.stack)
+	t := top - 1 // end of stack segment being rotated
+	var p int    // start of segment
+	if idx > 0 && idx <= top-(L.ci.cl+1) {
+		p = L.ci.cl + idx
+	} else if idx < 0 && -idx <= top-(L.ci.cl+1) {
+		p = top + idx
+	} else {
 		panic("index not in the stack")
 	}
 	var m int // end of prefix
@@ -95,22 +137,21 @@ func (L *luaState) CheckStack(n int) bool {
 	if n < 0 {
 		panic("negative 'n'")
 	}
-	if cap(L.stack)-len(L.stack) < n { // @todo
-		/* try to grow stack */
-		needed := len(L.stack) + n + EXTRA_STACK
-		newSize := 2 * cap(L.stack)
-		if newSize < needed {
-			newSize = needed
+	res := true
+	top := len(L.stack)
+	if L.stackLast-top < n {
+		if top+EXTRA_STACK > LUAI_MAXSTACK-n {
+			res = false
+		} else { /* try to grow stack */
+			res = L.protectedRun(func() {
+				L.stackGrow(n)
+			})
 		}
-		if newSize > LUAI_MAXSTACK {
-			return false
-		}
-		newStack := make([]value.LuaValue, len(L.stack), newSize)
-		copy(newStack, L.stack)
-		L.stack = newStack
 	}
-	// @todo adjust frame top
-	return true
+	if res && L.ci.top < top+n {
+		L.ci.top = top + n /* adjust frame top */
+	}
+	return res
 }
 
 func (L *luaState) IsNumber(idx int) bool {
@@ -125,12 +166,13 @@ func (L *luaState) IsString(idx int) bool {
 
 func (L *luaState) IsInteger(idx int) bool {
 	val, _ := L.stackGet(idx)
-	return val.Type() == value.LUA_TNUMINT
+	_, ok := val.(int64)
+	return ok
 }
 
 func (L *luaState) Type(idx int) lua.Type {
 	if val, ok := L.stackGet(idx); ok {
-		return value.NoVariantType(val.Type())
+		return typeOf(val)
 	}
 	return lua.TNONE
 }
@@ -139,42 +181,45 @@ func (L *luaState) TypeName(t lua.Type) string {
 	if t < lua.TNONE || t >= lua.NUMTAGS {
 		panic("invalid tag")
 	}
-	return value.TypeName(t)
+	return typeNames[t+1]
 }
 
 func (L *luaState) ToNumberX(idx int) (float64, bool) {
 	val, _ := L.stackGet(idx)
-	return value.ToNumber(val)
+	return toNumber(val)
 }
 
 func (L *luaState) ToIntegerX(idx int) (int64, bool) {
 	val, _ := L.stackGet(idx)
-	return value.ToInteger(val)
+	return toInteger(val)
 }
 
 func (L *luaState) ToBoolean(idx int) bool {
 	val, _ := L.stackGet(idx)
-	return value.ToBoolean(val)
+	return toBoolean(val)
 }
 
 func (L *luaState) ToStringX(idx int) (string, bool) {
 	val, _ := L.stackGet(idx)
-	if str, ok := value.ToString(val); ok {
-		L.stackSet(idx, value.NewString(str))
-		return str, ok
+	if str, ok := val.(string); ok {
+		return str, true
 	}
-	return "", false
+	str, ok := toString(val)
+	if ok {
+		L.stackSet(idx, str)
+	}
+	return str, ok
 }
 
 func (L *luaState) Arith(op lua.ArithOp) {
-	var a, b value.LuaValue
+	var a, b luaValue
 	b = L.stackPop()
 	if op != lua.OPUNM && op != lua.OPBNOT {
 		a = L.stackPop()
 	} else {
 		a = b
 	}
-	L.stackPush(vm.Arith(a, b, op))
+	L.stackPush(_arith(a, b, op))
 }
 
 func (L *luaState) Compare(idx1, idx2 int, op lua.CompareOp) bool {
@@ -185,60 +230,79 @@ func (L *luaState) Compare(idx1, idx2 int, op lua.CompareOp) bool {
 	}
 	switch op {
 	case lua.OPEQ:
-		return value.Equal(a, b)
+		return _eq(a, b)
 	case lua.OPLT:
-		return vm.LessThan(a, b)
+		return _lt(a, b)
 	case lua.OPLE:
-		return vm.LessEqual(a, b)
+		return _le(a, b)
 	default:
 		panic(fmt.Sprintf("invalid compare op: %d", op))
 	}
 }
 
 func (L *luaState) PushNil() {
-	L.stackPush(value.Nil)
+	L.stackPush(nil)
 }
 
 func (L *luaState) PushNumber(n float64) {
-	L.stackPush(value.NewNumber(n))
+	L.stackPush(n)
 }
 
 func (L *luaState) PushInteger(i int64) {
-	L.stackPush(value.NewInteger(i))
+	L.stackPush(i)
 }
 
 func (L *luaState) PushString(s string) {
-	L.stackPush(value.NewString(s))
+	L.stackPush(s)
 }
 
 func (L *luaState) PushBoolean(b bool) {
-	L.stackPush(value.NewBoolean(b))
+	L.stackPush(b)
 }
 
-func (L *luaState) Load(file *os.File, chunkName, mode string) int {
-	if proto, err := binary.Undump(file); err == nil {
-		L.proto = proto
-		L.pc = 0
+func (L *luaState) Call(nArgs, nResults int) {
+	// @todo "cannot use continuations inside hooks"
+	L.stackCheck(nArgs + 1)
+	// @todo check L.status == LUA_OK
+	if nResults != lua.MULTRET && L.ci.top-len(L.stack) < nResults-nArgs-1 {
+		panic("results from function overflow current stack size")
 	}
+	f, _ := L.stackGet(-(nArgs + 1))
+	// @todo need to prepare continuation?
+	if !L.preCall(f, nArgs, nResults) { // --> luaD_callnoyield
+		L.execute()
+	}
+	if nResults == lua.MULTRET && L.ci.top < len(L.stack) {
+		L.ci.top = len(L.stack)
+	}
+}
+
+func (L *luaState) Load(reader io.Reader, chunkName, mode string) int {
+	if proto, err := binary.Undump(reader); err == nil {
+		L.stackPush(newLuaClosure(proto))
+	}
+	// @todo
 	return 0
 }
 
 func (L *luaState) Concat(n int) {
+	L.stackCheck(n)
 	if n == 0 {
-		L.stackPush(value.NewString(""))
+		L.stackPush("")
 	} else if n >= 2 {
-		var vals []value.LuaValue
-		for n > 0 {
-			vals = append(vals, L.stackPop())
-			n--
+		top := len(L.stack)
+		res := _concat(L.stack[top-n : top])
+		for i := 1; i <= n; i++ {
+			L.stack[top-i] = nil
 		}
-		L.stackPush(vm.Concat(vals))
+		L.stack = L.stack[:top-n]
+		L.stackPush(res)
 	}
 }
 
 func (L *luaState) Len(idx int) {
 	val, _ := L.stackGet(idx)
-	L.stackPush(vm.Len(val))
+	L.stackPush(_len(val))
 }
 
 func (L *luaState) ToNumber(idx int) float64 {
@@ -290,25 +354,83 @@ func (L *luaState) Replace(idx int) {
 	L.Pop(1)
 }
 
-func (L *luaState) ConstantRead(idx int) value.LuaValue {
-	return L.proto.Constants[idx]
+func (L *luaState) protectedRun(f func()) (ok bool) {
+	defer func() {
+		switch x := recover().(type) {
+		case nil:
+			// no panic
+		case runtimeError:
+			ok = false
+		default:
+			panic(x)
+		}
+	}()
+	f()
+	return true
 }
 
-func (L *luaState) RegisterRead(idx int) value.LuaValue {
-	val, _ := L.stackGet(idx + 1)
-	return val
+func (L *luaState) preCall(f luaValue, nArgs, nResults int) bool {
+	switch cl := f.(type) {
+	case *lClosure:
+		top := len(L.stack)
+		p := cl.proto
+		frameSize := int(p.MaxStackSize)
+		if L.stackLast-top < frameSize {
+			L.stackGrow(frameSize)
+		}
+		nFixedArgs := int(p.NumParams)
+		var base int
+		stack := L.stack[:cap(L.stack)]
+		if p.IsVararg {
+			base = top
+			/* move fixed parameters to final position */
+			for i := 0; i < nFixedArgs && i < nArgs; i++ {
+				stack[base+i] = L.stack[base-nArgs+i]
+				L.stack[base-nArgs+i] = nil /* erase original copy (for GC) */
+			}
+		} else { /* non vararg function */
+			base = top - nArgs
+		}
+		for i := nArgs; i < nFixedArgs; i++ {
+			stack[base+i] = nil /* complete missing arguments */
+		}
+		L.stack = stack[:base+frameSize]
+		L.ci = &callInfo{
+			cl:         top - nArgs - 1,
+			top:        base + frameSize,
+			prev:       L.ci,
+			base:       base,
+			pc:         0,
+			nResults:   int16(nResults),
+			callStatus: CIST_LUA,
+		}
+		// @todo hookmask -> callhook
+		return false
+	default:
+		// @todo Go function & mt
+		panic(typeError(f, "call"))
+	}
 }
 
-func (L *luaState) RegisterWrite(idx int, val value.LuaValue) {
-	L.stackSet(idx+1, val)
-}
-
-func (L *luaState) Fetch() vm.Instruction {
-	i := L.proto.Code[L.pc]
-	L.pc++
-	return i
-}
-
-func (L *luaState) AddPC(n int) {
-	L.pc += n
+func (L *luaState) postCall(firstResult, nResults int) bool {
+	ci := L.ci
+	wanted := int(ci.nResults)
+	// @todo L->hookmask
+	L.ci = ci.prev
+	/* move results to proper place */
+	if wanted == lua.MULTRET {
+		for i := 0; i < nResults; i++ {
+			L.stack[ci.cl+i] = L.stack[firstResult+i]
+		}
+		L.stack = L.stack[:ci.cl+nResults] /* (!) */
+		return false
+	}
+	for i := 0; i < wanted && i < nResults; i++ {
+		L.stack[ci.cl+i] = L.stack[firstResult+i]
+	}
+	for i := nResults; i < wanted; i++ { /* complete wanted number of results */
+		L.stack[ci.cl+i] = nil
+	}
+	L.stack = L.stack[:ci.cl+wanted]
+	return true
 }

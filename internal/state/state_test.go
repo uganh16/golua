@@ -3,15 +3,16 @@ package state
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
-	"github.com/uganh16/golua/internal/vm"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
 func TestStack(t *testing.T) {
 	L := New()
-	if len(L.stack) != 0 {
+	if L.GetTop() != 0 {
 		t.Errorf("Empty stack expected: %v", L.stack)
 	}
 	L.PushBoolean(true)
@@ -55,32 +56,29 @@ func TestLuaOp(t *testing.T) {
 }
 
 func TestLuaVM(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/sum.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
+
 	L := New()
-	f, err := os.Open("../../test/sum.luac")
+	f, err := os.Open(fileName)
 	if err != nil {
 		return
 	}
+	defer f.Close()
 	L.Load(f, "", "b")
-	f.Close()
+	L.Call(0, 1)
+	printStack(L)
+}
 
-	nRegs := int(L.proto.MaxStackSize)
-	L.CheckStack(nRegs + 8)
-	L.SetTop(nRegs)
+func TestLuaFunction(t *testing.T) {
 
-	for {
-		i := L.Fetch()
-		if i.Opcode() != vm.OP_RETURN {
-			i.Execute(L)
-			fmt.Printf("[%02d] %s ", L.pc, i.OpName())
-			printStack(L)
-		} else {
-			break
-		}
-	}
 }
 
 func printStack(L *luaState) {
-	for idx := 1; idx <= len(L.stack); idx++ {
+	for idx := 1; idx <= L.GetTop(); idx++ {
 		t := L.Type(idx)
 		switch t {
 		case lua.TBOOLEAN:

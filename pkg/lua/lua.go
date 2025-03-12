@@ -1,5 +1,7 @@
 package lua
 
+import "io"
+
 const (
 	VERSION_MAJOR = 5
 	VERSION_MINOR = 3
@@ -7,6 +9,9 @@ const (
 
 /* mark for precompiled code ('<esc>Lua') */
 const SIGNATURE = "\x1bLua"
+
+/* option for multiple returns */
+const MULTRET = -1
 
 type Type int
 
@@ -27,6 +32,9 @@ const (
 
 	NUMTAGS
 )
+
+/* minimum Lua stack available to a Go function */
+const MINSTACK = 20
 
 /* type of numbers in Lua */
 type Number = float64
@@ -100,6 +108,12 @@ type LuaState interface {
 	PushInteger(i int64)
 	PushString(s string)
 	PushBoolean(b bool)
+
+	/**
+	 * 'load' and 'call' functions (load and run Lua code)
+	 */
+	Call(nArgs, nResults int)
+	Load(reader io.Reader, chunkName, mode string) int
 
 	/**
 	 * miscellaneous functions
