@@ -18,10 +18,12 @@ func typeOf(val luaValue) lua.Type {
 		return lua.TNIL
 	case bool:
 		return lua.TBOOLEAN
-	case float64, int64:
+	case lua.Number, lua.Integer:
 		return lua.TNUMBER
 	case string:
 		return lua.TSTRING
+	case *luaTable:
+		return lua.TTABLE
 	case *lClosure:
 		return lua.TFUNCTION
 	default:
@@ -40,12 +42,12 @@ func toBoolean(val luaValue) bool {
 	}
 }
 
-func toNumber(val luaValue) (float64, bool) {
+func toNumber(val luaValue) (lua.Number, bool) {
 	switch val := val.(type) {
-	case float64:
+	case lua.Number:
 		return val, true
-	case int64:
-		return float64(val), true
+	case lua.Integer:
+		return lua.Number(val), true
 	case string:
 		return number.ParseFloat(val)
 	default:
@@ -53,12 +55,12 @@ func toNumber(val luaValue) (float64, bool) {
 	}
 }
 
-func toInteger(val luaValue) (int64, bool) {
+func toInteger(val luaValue) (lua.Integer, bool) {
 	switch val := val.(type) {
-	case int64:
+	case lua.Integer:
 		return val, true
-	case float64:
-		return number.FloatToInteger(float64(val))
+	case lua.Number:
+		return number.FloatToInteger(lua.Number(val))
 	case string:
 		if val, ok := number.ParseInteger(string(val)); ok {
 			return val, ok
@@ -74,7 +76,7 @@ func toString(val luaValue) (string, bool) {
 	switch val := val.(type) {
 	case string:
 		return val, true
-	case float64, int64:
+	case lua.Number, lua.Integer:
 		str := fmt.Sprintf("%v", val) // @todo
 		return str, true
 	default:
@@ -83,44 +85,44 @@ func toString(val luaValue) (string, bool) {
 }
 
 func _arith(a, b luaValue, op lua.ArithOp) luaValue {
-	var iFunc func(int64, int64) int64
-	var fFunc func(float64, float64) float64
+	var iFunc func(lua.Integer, lua.Integer) lua.Integer
+	var fFunc func(lua.Number, lua.Number) lua.Number
 
 	switch op {
 	case lua.OPADD:
-		iFunc = func(a, b int64) int64 { return a + b }
-		fFunc = func(a, b float64) float64 { return a + b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a + b }
+		fFunc = func(a, b lua.Number) lua.Number { return a + b }
 	case lua.OPSUB:
-		iFunc = func(a, b int64) int64 { return a - b }
-		fFunc = func(a, b float64) float64 { return a - b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a - b }
+		fFunc = func(a, b lua.Number) lua.Number { return a - b }
 	case lua.OPMUL:
-		iFunc = func(a, b int64) int64 { return a * b }
-		fFunc = func(a, b float64) float64 { return a * b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a * b }
+		fFunc = func(a, b lua.Number) lua.Number { return a * b }
 	case lua.OPMOD:
 		iFunc = number.IMod
 		fFunc = number.FMod
 	case lua.OPPOW:
 		fFunc = math.Pow
 	case lua.OPDIV:
-		fFunc = func(a, b float64) float64 { return a / b }
+		fFunc = func(a, b lua.Number) lua.Number { return a / b }
 	case lua.OPIDIV:
 		iFunc = number.IFloorDiv
 		fFunc = number.FFloorDiv
 	case lua.OPBAND:
-		iFunc = func(a, b int64) int64 { return a & b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a & b }
 	case lua.OPBOR:
-		iFunc = func(a, b int64) int64 { return a | b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a | b }
 	case lua.OPBXOR:
-		iFunc = func(a, b int64) int64 { return a ^ b }
+		iFunc = func(a, b lua.Integer) lua.Integer { return a ^ b }
 	case lua.OPSHL:
 		iFunc = number.ShiftLeft
 	case lua.OPSHR:
 		iFunc = number.ShiftRight
 	case lua.OPUNM:
-		iFunc = func(a, _ int64) int64 { return -a }
-		fFunc = func(a, _ float64) float64 { return -a }
+		iFunc = func(a, _ lua.Integer) lua.Integer { return -a }
+		fFunc = func(a, _ lua.Number) lua.Number { return -a }
 	case lua.OPBNOT:
-		iFunc = func(a, _ int64) int64 { return ^a }
+		iFunc = func(a, _ lua.Integer) lua.Integer { return ^a }
 	default:
 		panic(fmt.Sprintf("invalid arith op: %d", op))
 	}
@@ -133,8 +135,8 @@ func _arith(a, b luaValue, op lua.ArithOp) luaValue {
 		}
 	} else {
 		if iFunc != nil {
-			if a, ok := a.(int64); ok {
-				if b, ok := b.(int64); ok {
+			if a, ok := a.(lua.Integer); ok {
+				if b, ok := b.(lua.Integer); ok {
 					return iFunc(a, b)
 				}
 			}
@@ -173,21 +175,21 @@ func _eq(a, b luaValue) bool {
 	case string:
 		b, ok := b.(string)
 		return ok && a == b
-	case int64:
+	case lua.Integer:
 		switch b := b.(type) {
-		case int64:
+		case lua.Integer:
 			return a == b
-		case float64:
-			return float64(a) == b
+		case lua.Number:
+			return lua.Number(a) == b
 		default:
 			return false
 		}
-	case float64:
+	case lua.Number:
 		switch b := b.(type) {
-		case float64:
+		case lua.Number:
 			return a == b
-		case int64:
-			return a == float64(b)
+		case lua.Integer:
+			return a == lua.Number(b)
 		default:
 			return false
 		}
@@ -198,19 +200,19 @@ func _eq(a, b luaValue) bool {
 
 func _lt(a, b luaValue) bool {
 	switch a := a.(type) {
-	case int64:
+	case lua.Integer:
 		switch b := b.(type) {
-		case int64:
+		case lua.Integer:
 			return a < b
-		case float64:
-			return float64(a) < b
+		case lua.Number:
+			return lua.Number(a) < b
 		}
-	case float64:
+	case lua.Number:
 		switch b := b.(type) {
-		case float64:
+		case lua.Number:
 			return a < b
-		case int64:
-			return a < float64(b)
+		case lua.Integer:
+			return a < lua.Number(b)
 		}
 	case string:
 		if b, ok := b.(string); ok {
@@ -223,19 +225,19 @@ func _lt(a, b luaValue) bool {
 
 func _le(a, b luaValue) bool {
 	switch a := a.(type) {
-	case int64:
+	case lua.Integer:
 		switch b := b.(type) {
-		case int64:
+		case lua.Integer:
 			return a <= b
-		case float64:
-			return float64(a) <= b
+		case lua.Number:
+			return lua.Number(a) <= b
 		}
-	case float64:
+	case lua.Number:
 		switch b := b.(type) {
-		case float64:
+		case lua.Number:
 			return a <= b
-		case int64:
-			return a <= float64(b)
+		case lua.Integer:
+			return a <= lua.Number(b)
 		}
 	case string:
 		if b, ok := b.(string); ok {
@@ -246,12 +248,15 @@ func _le(a, b luaValue) bool {
 	panic(orderError(a, b))
 }
 
-func _len(val luaValue) int64 {
-	if str, ok := val.(string); ok {
-		return int64(len(str))
+func _len(val luaValue) lua.Integer {
+	if s, ok := val.(string); ok {
+		return lua.Integer(len(s))
+	} else if t, ok := val.(*luaTable); ok {
+		return lua.Integer(t.len())
+	} else {
+		// @todo tm
+		panic(typeError(val, "get length of"))
 	}
-	// @todo tm
-	panic(typeError(val, "get length of"))
 }
 
 func _concat(vals []luaValue) luaValue {

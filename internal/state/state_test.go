@@ -73,8 +73,40 @@ func TestLuaVM(t *testing.T) {
 	printStack(L)
 }
 
-func TestLuaFunction(t *testing.T) {
+func TestTable(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/test_table.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
 
+	L := New()
+	f, err := os.Open(fileName)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	L.Load(f, "", "b")
+	L.Call(0, 1)
+	printStack(L)
+}
+
+func TestLuaFunction(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/max.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
+
+	L := New()
+	f, err := os.Open(fileName)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	L.Load(f, "", "b")
+	L.Call(0, 0)
+	printStack(L)
 }
 
 func printStack(L *luaState) {

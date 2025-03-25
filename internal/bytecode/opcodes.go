@@ -125,3 +125,6 @@ var opcodes = [...]opcode{
 	{0, 1, OpArgU, OpArgN, IABC, "VARARG"},
 	{0, 0, OpArgU, OpArgU, IAx, "EXTRAARG"},
 }
+
+/* number of list items to accumulate before a SETLIST instruction */
+const LFIELDS_PER_FLUSH = 50

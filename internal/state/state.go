@@ -166,7 +166,7 @@ func (L *luaState) IsString(idx int) bool {
 
 func (L *luaState) IsInteger(idx int) bool {
 	val, _ := L.stackGet(idx)
-	_, ok := val.(int64)
+	_, ok := val.(lua.Integer)
 	return ok
 }
 
@@ -184,12 +184,12 @@ func (L *luaState) TypeName(t lua.Type) string {
 	return typeNames[t+1]
 }
 
-func (L *luaState) ToNumberX(idx int) (float64, bool) {
+func (L *luaState) ToNumberX(idx int) (lua.Number, bool) {
 	val, _ := L.stackGet(idx)
 	return toNumber(val)
 }
 
-func (L *luaState) ToIntegerX(idx int) (int64, bool) {
+func (L *luaState) ToIntegerX(idx int) (lua.Integer, bool) {
 	val, _ := L.stackGet(idx)
 	return toInteger(val)
 }
@@ -244,11 +244,11 @@ func (L *luaState) PushNil() {
 	L.stackPush(nil)
 }
 
-func (L *luaState) PushNumber(n float64) {
+func (L *luaState) PushNumber(n lua.Number) {
 	L.stackPush(n)
 }
 
-func (L *luaState) PushInteger(i int64) {
+func (L *luaState) PushInteger(i lua.Integer) {
 	L.stackPush(i)
 }
 
@@ -258,6 +258,51 @@ func (L *luaState) PushString(s string) {
 
 func (L *luaState) PushBoolean(b bool) {
 	L.stackPush(b)
+}
+
+func (L *luaState) GetTable(idx int) lua.Type {
+	t, _ := L.stackGet(idx)
+	k := L.stackPop()
+	v := L.getTable(t, k)
+	L.stackPush(v)
+	return typeOf(v)
+}
+
+func (L *luaState) GetField(idx int, k string) lua.Type {
+	t, _ := L.stackGet(idx)
+	v := L.getTable(t, k)
+	L.stackPush(v)
+	return typeOf(v)
+}
+
+func (L *luaState) GetI(idx int, n lua.Integer) lua.Type {
+	t, _ := L.stackGet(idx)
+	v := L.getTable(t, n)
+	L.stackPush(v)
+	return typeOf(v)
+}
+
+func (L *luaState) CreateTable(nArr, nRec int) {
+	L.stackPush(newLuaTable(nArr, nRec))
+}
+
+func (L *luaState) SetTable(idx int) {
+	t, _ := L.stackGet(idx)
+	v := L.stackPop()
+	k := L.stackPop()
+	L.setTable(t, k, v)
+}
+
+func (L *luaState) SetField(idx int, k string) {
+	t, _ := L.stackGet(idx)
+	v := L.stackPop()
+	L.setTable(t, k, v)
+}
+
+func (L *luaState) SetI(idx int, n lua.Integer) {
+	t, _ := L.stackGet(idx)
+	v := L.stackPop()
+	L.setTable(t, n, v)
 }
 
 func (L *luaState) Call(nArgs, nResults int) {
@@ -305,18 +350,22 @@ func (L *luaState) Len(idx int) {
 	L.stackPush(_len(val))
 }
 
-func (L *luaState) ToNumber(idx int) float64 {
+func (L *luaState) ToNumber(idx int) lua.Number {
 	val, _ := L.ToNumberX(idx)
 	return val
 }
 
-func (L *luaState) ToInteger(idx int) int64 {
+func (L *luaState) ToInteger(idx int) lua.Integer {
 	val, _ := L.ToIntegerX(idx)
 	return val
 }
 
 func (L *luaState) Pop(n int) {
 	L.SetTop(-n - 1)
+}
+
+func (L *luaState) NewTable() {
+	L.CreateTable(0, 0)
 }
 
 func (L *luaState) IsNil(idx int) bool {
@@ -367,6 +416,21 @@ func (L *luaState) protectedRun(f func()) (ok bool) {
 	}()
 	f()
 	return true
+}
+
+func (L *luaState) getTable(t, k luaValue) luaValue {
+	if t, ok := t.(*luaTable); ok {
+		return t.get(k)
+	}
+	panic(typeError(t, "index"))
+}
+
+func (L *luaState) setTable(t, k, v luaValue) {
+	if t, ok := t.(*luaTable); ok {
+		t.set(k, v)
+		return
+	}
+	panic(typeError(t, "index"))
 }
 
 func (L *luaState) preCall(f luaValue, nArgs, nResults int) bool {

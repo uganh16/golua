@@ -2,6 +2,7 @@ package state
 
 import (
 	"github.com/uganh16/golua/internal/bytecode"
+	"github.com/uganh16/golua/internal/number"
 	"github.com/uganh16/golua/pkg/lua"
 )
 
@@ -25,7 +26,7 @@ newFrame:
 			L.setR(a, L.getK(bx))
 		case bytecode.OP_LOADKX: /* R(A) := Kst(extra arg) */
 			a, _ := i.ABx()
-			ax := p.Code[ci.pc].Ax()
+			ax := p.Code[ci.pc].Ax() // @todo assert OP_EXTRAARG
 			ci.pc++
 			L.setR(a, L.getK(ax))
 		case bytecode.OP_LOADBOOL: /* R(A) := (Bool)B; if (C) pc++ */
@@ -42,12 +43,23 @@ newFrame:
 			}
 		case bytecode.OP_GETUPVAL:
 		case bytecode.OP_GETTABUP:
-		case bytecode.OP_GETTABLE:
+		case bytecode.OP_GETTABLE: /* R(A) := R(B)[RK(C)] */
+			a, b, c := i.ABC()
+			L.setR(a, L.getTable(L.getR(b), L.getRK(c)))
 		case bytecode.OP_SETTABUP:
 		case bytecode.OP_SETUPVAL:
-		case bytecode.OP_SETTABLE:
-		case bytecode.OP_NEWTABLE:
-		case bytecode.OP_SELF:
+		case bytecode.OP_SETTABLE: /* R(A)[RK(B)] := RK(C) */
+			a, b, c := i.ABC()
+			L.setTable(L.getR(a), L.getRK(b), L.getRK(c))
+		case bytecode.OP_NEWTABLE: /* R(A) := {} (size = B,C) */
+			a, b, c := i.ABC()
+			L.setR(a, newLuaTable(number.Fb2int(b), number.Fb2int(c)))
+		case bytecode.OP_SELF: /* R(A+1) := R(B); R(A) := R(B)[RK(C)] */
+			a, b, c := i.ABC()
+			key := L.getRK(c).(string) /* key must be a string */
+			t := L.getR(b)
+			L.setR(a+1, t)
+			L.setR(a, L.getTable(t, key))
 		case
 			bytecode.OP_ADD,  /* R(A) := RK(B) + RK(C) */
 			bytecode.OP_SUB,  /* R(A) := RK(B) - RK(C) */
@@ -74,12 +86,10 @@ newFrame:
 			L.setR(a, !toBoolean(L.getR(b)))
 		case bytecode.OP_LEN: /* R(A) := length of R(B) */
 			a, b, _ := i.ABC()
-			a += 1
-			b += 1
 			L.setR(a, _len(L.getR(b)))
 		case bytecode.OP_CONCAT: /* R(A) := R(B).. ... ..R(C) */
 			a, b, c := i.ABC()
-			L.setR(a, _concat(L.stack[b:c+1]))
+			L.setR(a, _concat(L.stack[base+b:base+c+1]))
 		case bytecode.OP_JMP: /* pc+=sBx; if (A) close all upvalues >= R(A - 1) */
 			a, sbx := i.AsBx()
 			ci.pc += sbx
@@ -180,7 +190,22 @@ newFrame:
 			ci.pc += sbx
 		case bytecode.OP_TFORCALL:
 		case bytecode.OP_TFORLOOP:
-		case bytecode.OP_SETLIST:
+		case bytecode.OP_SETLIST: /* R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B */
+			a, b, c := i.ABC()
+			if b == 0 {
+				b = len(L.stack) - (base + a) - 1
+			}
+			if c == 0 {
+				c = p.Code[ci.pc].Ax() // @todo assert OP_EXTRAARG
+				ci.pc++
+			}
+			t := L.getR(a).(*luaTable)
+			idx := lua.Integer((c - 1) * bytecode.LFIELDS_PER_FLUSH)
+			for j := 1; j <= b; j++ {
+				idx++
+				t.set(idx, L.getR(a+j))
+			}
+			L.stack = L.stack[:ci.top] /* correct top (in case of previous open call) */
 		case bytecode.OP_CLOSURE: /* R(A) := closure(KPROTO[Bx]) */
 			a, bx := i.ABx()
 			L.setR(a, newLuaClosure(cl.proto.Protos[bx]))
@@ -210,12 +235,11 @@ newFrame:
 }
 
 func (L *luaState) getR(idx int) luaValue {
-	val, _ := L.stackGet(idx + 1)
-	return val
+	return L.stack[L.ci.base+idx]
 }
 
 func (L *luaState) setR(idx int, val luaValue) {
-	L.stackSet(idx+1, val)
+	L.stack[L.ci.base+idx] = val
 }
 
 func (L *luaState) getK(idx int) luaValue {

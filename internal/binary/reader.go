@@ -93,9 +93,9 @@ func (r *reader) readConstants(order binary.ByteOrder) []interface{} {
 		case lua.TBOOLEAN:
 			constants[i] = r.readByte() != 0
 		case LUA_TNUMINT:
-			constants[i] = int64(r.readUint64(order))
+			constants[i] = lua.Integer(r.readUint64(order))
 		case LUA_TNUMFLT:
-			constants[i] = r.readFloat64(order)
+			constants[i] = lua.Number(r.readFloat64(order))
 		case LUA_TSHRSTR, LUA_TLNGSTR:
 			constants[i] = r.readString(order)
 		default:

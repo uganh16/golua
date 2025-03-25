@@ -89,8 +89,8 @@ type LuaState interface {
 	IsInteger(idx int) bool
 	Type(idx int) Type
 	TypeName(t Type) string
-	ToNumberX(idx int) (float64, bool)
-	ToIntegerX(idx int) (int64, bool)
+	ToNumberX(idx int) (Number, bool)
+	ToIntegerX(idx int) (Integer, bool)
 	ToBoolean(idx int) bool
 	ToStringX(idx int) (string, bool)
 
@@ -104,10 +104,27 @@ type LuaState interface {
 	 * push functions (Go -> stack)
 	 */
 	PushNil()
-	PushNumber(n float64)
-	PushInteger(i int64)
+	PushNumber(n Number)
+	PushInteger(i Integer)
 	PushString(s string)
 	PushBoolean(b bool)
+
+	/**
+	 * get functions (Lua -> stack)
+	 */
+
+	GetTable(idx int) Type
+	GetField(idx int, k string) Type
+	GetI(idx int, n Integer) Type
+
+	CreateTable(nArr, nRec int)
+
+	/**
+	 * set functions (stack -> Lua)
+	 */
+	SetTable(idx int)
+	SetField(idx int, k string)
+	SetI(idx int, n Integer)
 
 	/**
 	 * 'load' and 'call' functions (load and run Lua code)
@@ -124,9 +141,10 @@ type LuaState interface {
 	/**
 	 * some useful macros
 	 */
-	ToNumber(idx int) float64
-	ToInteger(idx int) int64
+	ToNumber(idx int) Number
+	ToInteger(idx int) Integer
 	Pop(n int)
+	NewTable()
 	IsNil(idx int) bool
 	IsBoolean(idx int) bool
 	IsNone(idx int) bool

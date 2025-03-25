@@ -115,9 +115,9 @@ func printDebug(p *binary.Proto) {
 			s = "nil"
 		case bool:
 			s = fmt.Sprintf("%t", k)
-		case int64:
+		case lua.Integer:
 			s = fmt.Sprintf("%d", k)
-		case float64:
+		case lua.Number:
 			s = fmt.Sprintf("%g", k)
 		case string:
 			s = fmt.Sprintf("%q", k)
