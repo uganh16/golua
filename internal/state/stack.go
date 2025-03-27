@@ -1,9 +1,9 @@
 package state
 
-/**
- * LUAI_MAXSTACK limits the size of the Lua stack.
- */
-const LUAI_MAXSTACK = 1000000
+import (
+	"github.com/uganh16/golua/internal/conf"
+	"github.com/uganh16/golua/pkg/lua"
+)
 
 func (L *luaState) stackPush(val luaValue) {
 	if len(L.stack) >= L.ci.top {
@@ -31,7 +31,9 @@ func (L *luaState) stackGet(idx int) (luaValue, bool) {
 		} else {
 			return L.stack[L.ci.cl+idx], true
 		}
-	} else { // @todo pseudo
+	} else if idx == lua.REGISTRYINDEX {
+		return L.lG.lRegistry, true
+	} else { // @todo upvalues
 		if idx == 0 || -idx > top-(L.ci.cl+1) {
 			panic("invalid index")
 		}
@@ -49,7 +51,9 @@ func (L *luaState) stackSet(idx int, val luaValue) {
 		} else {
 			L.stack[L.ci.cl+idx] = val
 		}
-	} else { // @todo pseudo
+	} else if idx == lua.REGISTRYINDEX {
+		L.lG.lRegistry = val
+	} else { // @todo upvalues
 		if idx == 0 || -idx > top {
 			panic("invalid index")
 		}
@@ -59,20 +63,20 @@ func (L *luaState) stackSet(idx int, val luaValue) {
 
 func (L *luaState) stackGrow(n int) {
 	size := cap(L.stack)
-	if size > LUAI_MAXSTACK { /* error after extra size? */
+	if size > conf.LUAI_MAXSTACK { /* error after extra size? */
 		// @todo luaD_throw(L, LUA_ERRERR);
 	}
 	needed := len(L.stack) + n + EXTRA_STACK
 	newSize := 2 * size
-	if newSize > LUAI_MAXSTACK {
-		newSize = LUAI_MAXSTACK
+	if newSize > conf.LUAI_MAXSTACK {
+		newSize = conf.LUAI_MAXSTACK
 	}
 	if newSize < needed {
 		newSize = needed
 	}
-	if newSize > LUAI_MAXSTACK { /* stack overflow? */
+	if newSize > conf.LUAI_MAXSTACK { /* stack overflow? */
 		/* some space for error handling */
-		L.stackRealloc(LUAI_MAXSTACK + 200)
+		L.stackRealloc(conf.LUAI_MAXSTACK + 200)
 		panic(runtimeError("stack overflow"))
 	} else {
 		L.stackRealloc(newSize)

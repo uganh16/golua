@@ -106,7 +106,14 @@ func TestLuaFunction(t *testing.T) {
 	defer f.Close()
 	L.Load(f, "", "b")
 	L.Call(0, 0)
-	printStack(L)
+}
+
+func TestGoFunction(t *testing.T) {
+	L := New()
+	L.Register("print", print)
+	L.GetGlobal("print")
+	L.PushInteger(16)
+	L.Call(1, 0)
 }
 
 func printStack(L *luaState) {
@@ -124,4 +131,22 @@ func printStack(L *luaState) {
 		}
 	}
 	fmt.Println()
+}
+
+func print(L lua.State) int {
+	nArgs := L.GetTop()
+	for idx := 1; idx <= nArgs; idx++ {
+		if L.IsBoolean(idx) {
+			fmt.Printf("%t", L.ToBoolean(idx))
+		} else if L.IsString(idx) {
+			fmt.Print(L.ToString(idx))
+		} else {
+			fmt.Print(L.TypeName(L.Type(idx)))
+		}
+		if idx < nArgs {
+			fmt.Print("\t")
+		}
+	}
+	fmt.Println()
+	return 0
 }

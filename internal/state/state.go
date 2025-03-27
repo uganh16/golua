@@ -5,8 +5,14 @@ import (
 	"io"
 
 	"github.com/uganh16/golua/internal/binary"
+	"github.com/uganh16/golua/internal/conf"
 	"github.com/uganh16/golua/pkg/lua"
 )
+
+/* test for pseudo index */
+func isPseudo(idx int) bool {
+	return idx <= lua.REGISTRYINDEX
+}
 
 /* extra stack space to handle TM calls and some other extras */
 const EXTRA_STACK = 5
@@ -41,11 +47,16 @@ const (
 	CIST_FIN
 )
 
+type global_State struct {
+	lRegistry luaValue
+}
+
 type luaState struct {
 	stack     []luaValue
 	stackLast int /* last free slot in the stack */
 	baseCI    callInfo
 	ci        *callInfo
+	lG        *global_State
 }
 
 func New() *luaState {
@@ -53,21 +64,32 @@ func New() *luaState {
 		stack:     make([]luaValue, 1, BASIC_STACK_SIZE),
 		stackLast: BASIC_STACK_SIZE - EXTRA_STACK,
 		baseCI: callInfo{
-			cl:   0,
-			top:  1 + lua.MINSTACK,
-			prev: nil,
+			cl:         0,
+			top:        1 + lua.MINSTACK,
+			prev:       nil,
+			callStatus: 0,
 		},
+		lG: &global_State{},
 	}
 	L.ci = &L.baseCI
+
+	/* init_registry: Create registry table and its predefined values */
+	registry := newLuaTable(lua.RIDX_LAST, 0)
+	L.lG.lRegistry = registry
+	/* registry[lua.RIDX_MAINTHREAD] = L */
+	registry.set(lua.Integer(lua.RIDX_MAINTHREAD), L)
+	/* registry[lua.RIDX_GLOBALS] = table of globals */
+	registry.set(lua.Integer(lua.RIDX_GLOBALS), newLuaTable(0, 0))
+
 	return L
 }
 
 func (L *luaState) AbsIndex(idx int) int {
-	if idx > 0 {
+	if idx > 0 || isPseudo(idx) {
 		return idx
+	} else {
+		return len(L.stack) - L.ci.cl + idx
 	}
-	// @todo pseudo
-	return len(L.stack) - L.ci.cl + idx
 }
 
 func (L *luaState) GetTop() int {
@@ -140,7 +162,7 @@ func (L *luaState) CheckStack(n int) bool {
 	res := true
 	top := len(L.stack)
 	if L.stackLast-top < n {
-		if top+EXTRA_STACK > LUAI_MAXSTACK-n {
+		if top+EXTRA_STACK > conf.LUAI_MAXSTACK-n {
 			res = false
 		} else { /* try to grow stack */
 			res = L.protectedRun(func() {
@@ -162,6 +184,16 @@ func (L *luaState) IsNumber(idx int) bool {
 func (L *luaState) IsString(idx int) bool {
 	t := L.Type(idx)
 	return t == lua.TSTRING || t == lua.TNUMBER
+}
+
+func (L *luaState) IsGoFunction(idx int) bool {
+	val, _ := L.stackGet(idx)
+	switch val.(type) {
+	case lua.GoFunction: // @todo
+		return true
+	default:
+		return false
+	}
 }
 
 func (L *luaState) IsInteger(idx int) bool {
@@ -209,6 +241,15 @@ func (L *luaState) ToStringX(idx int) (string, bool) {
 		L.stackSet(idx, str)
 	}
 	return str, ok
+}
+
+func (L *luaState) ToGoFunction(idx int) lua.GoFunction {
+	val, _ := L.stackGet(idx)
+	if f, ok := val.(lua.GoFunction); ok {
+		return f
+	} else { // @todo
+		return nil
+	}
 }
 
 func (L *luaState) Arith(op lua.ArithOp) {
@@ -260,30 +301,35 @@ func (L *luaState) PushBoolean(b bool) {
 	L.stackPush(b)
 }
 
+func (L *luaState) GetGlobal(name string) lua.Type {
+	reg := L.lG.lRegistry.(*luaTable)
+	return L.getTableAux(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name)
+}
+
 func (L *luaState) GetTable(idx int) lua.Type {
 	t, _ := L.stackGet(idx)
-	k := L.stackPop()
-	v := L.getTable(t, k)
-	L.stackPush(v)
-	return typeOf(v)
+	k := L.stackPop() // @todo do not pop?
+	return L.getTableAux(t, k)
 }
 
 func (L *luaState) GetField(idx int, k string) lua.Type {
 	t, _ := L.stackGet(idx)
-	v := L.getTable(t, k)
-	L.stackPush(v)
-	return typeOf(v)
+	return L.getTableAux(t, k)
 }
 
 func (L *luaState) GetI(idx int, n lua.Integer) lua.Type {
 	t, _ := L.stackGet(idx)
-	v := L.getTable(t, n)
-	L.stackPush(v)
-	return typeOf(v)
+	return L.getTableAux(t, n)
 }
 
 func (L *luaState) CreateTable(nArr, nRec int) {
 	L.stackPush(newLuaTable(nArr, nRec))
+}
+
+func (L *luaState) SetGlobal(name string) {
+	reg := L.lG.lRegistry.(*luaTable)
+	v := L.stackPop()
+	L.setTable(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name, v)
 }
 
 func (L *luaState) SetTable(idx int) {
@@ -368,6 +414,15 @@ func (L *luaState) NewTable() {
 	L.CreateTable(0, 0)
 }
 
+func (L *luaState) Register(n string, f lua.GoFunction) {
+	L.PushGoFunction(f)
+	L.SetGlobal(n)
+}
+
+func (L *luaState) PushGoFunction(f lua.GoFunction) { // @todo
+	L.stackPush(f)
+}
+
 func (L *luaState) IsNil(idx int) bool {
 	return L.Type(idx) == lua.TNIL
 }
@@ -382,6 +437,15 @@ func (L *luaState) IsNone(idx int) bool {
 
 func (L *luaState) IsNoneOrNil(idx int) bool {
 	return L.Type(idx) <= lua.TNIL
+}
+
+func (L *luaState) PushGlobalTable() {
+	// @todo use RawGetI
+	t, _ := L.stackGet(lua.REGISTRYINDEX)
+	if t, ok := t.(*luaTable); ok {
+		L.stackPush(t.get(lua.Integer(lua.RIDX_GLOBALS)))
+	}
+	panic("table expected")
 }
 
 func (L *luaState) ToString(idx int) string {
@@ -425,6 +489,12 @@ func (L *luaState) getTable(t, k luaValue) luaValue {
 	panic(typeError(t, "index"))
 }
 
+func (L *luaState) getTableAux(t, k luaValue) lua.Type {
+	v := L.getTable(t, k)
+	L.stackPush(v)
+	return typeOf(v)
+}
+
 func (L *luaState) setTable(t, k, v luaValue) {
 	if t, ok := t.(*luaTable); ok {
 		t.set(k, v)
@@ -433,10 +503,28 @@ func (L *luaState) setTable(t, k, v luaValue) {
 	panic(typeError(t, "index"))
 }
 
-func (L *luaState) preCall(f luaValue, nArgs, nResults int) bool {
-	switch cl := f.(type) {
+func (L *luaState) preCall(val luaValue, nArgs, nResults int) bool {
+	var f lua.GoFunction
+	top := len(L.stack)
+	switch cl := val.(type) {
+	case lua.GoFunction:
+		f = cl
+		if L.stackLast-top < lua.MINSTACK {
+			L.stackGrow(lua.MINSTACK)
+		}
+		L.ci = &callInfo{
+			cl:         top - nArgs - 1,
+			top:        top + lua.MINSTACK,
+			prev:       L.ci,
+			nResults:   int16(nResults),
+			callStatus: 0,
+		}
+		// @todo hook
+		n := f(L)
+		L.stackCheck(n)
+		L.postCall(len(L.stack)-n, n)
+		return true
 	case *lClosure:
-		top := len(L.stack)
 		p := cl.proto
 		frameSize := int(p.MaxStackSize)
 		if L.stackLast-top < frameSize {
@@ -471,8 +559,8 @@ func (L *luaState) preCall(f luaValue, nArgs, nResults int) bool {
 		// @todo hookmask -> callhook
 		return false
 	default:
-		// @todo Go function & mt
-		panic(typeError(f, "call"))
+		// @todo Go closure & mt
+		panic(typeError(val, "call"))
 	}
 }
 
