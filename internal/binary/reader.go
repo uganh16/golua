@@ -109,7 +109,7 @@ func (r *reader) readUpvalues(order binary.ByteOrder) []Upvalue {
 	upvalues := make([]Upvalue, r.readUint32(order))
 	for i := range upvalues {
 		upvalues[i] = Upvalue{
-			InStack: r.readByte(),
+			InStack: r.readByte() != 0,
 			Idx:     r.readByte(),
 		}
 	}

@@ -24,7 +24,7 @@ func typeOf(val luaValue) lua.Type {
 		return lua.TSTRING
 	case *luaTable:
 		return lua.TTABLE
-	case lua.GoFunction, *lClosure:
+	case lua.GoFunction, *lClosure, *gClosure:
 		return lua.TFUNCTION
 	default:
 		panic("not a Lua value")

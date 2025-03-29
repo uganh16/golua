@@ -53,7 +53,8 @@ type global_State struct {
 
 type luaState struct {
 	stack     []luaValue
-	stackLast int /* last free slot in the stack */
+	stackLast int      /* last free slot in the stack */
+	openUpval *upvalue /* list of open upvalues in this stack */
 	baseCI    callInfo
 	ci        *callInfo
 	lG        *global_State
@@ -152,7 +153,6 @@ func (L *luaState) Rotate(idx, n int) {
 func (L *luaState) Copy(srcIdx, dstIdx int) {
 	val, _ := L.stackGet(srcIdx)
 	L.stackSet(dstIdx, val)
-	// @todo function upvalue?
 }
 
 func (L *luaState) CheckStack(n int) bool {
@@ -189,7 +189,7 @@ func (L *luaState) IsString(idx int) bool {
 func (L *luaState) IsGoFunction(idx int) bool {
 	val, _ := L.stackGet(idx)
 	switch val.(type) {
-	case lua.GoFunction: // @todo
+	case lua.GoFunction, *gClosure:
 		return true
 	default:
 		return false
@@ -247,7 +247,9 @@ func (L *luaState) ToGoFunction(idx int) lua.GoFunction {
 	val, _ := L.stackGet(idx)
 	if f, ok := val.(lua.GoFunction); ok {
 		return f
-	} else { // @todo
+	} else if cl, ok := val.(*gClosure); ok {
+		return cl.f
+	} else {
 		return nil
 	}
 }
@@ -295,6 +297,26 @@ func (L *luaState) PushInteger(i lua.Integer) {
 
 func (L *luaState) PushString(s string) {
 	L.stackPush(s)
+}
+
+func (L *luaState) PushGoClosure(f lua.GoFunction, n int) {
+	if n == 0 {
+		L.stackPush(f)
+	} else {
+		L.stackCheck(n)
+		if n > MAXUPVAL {
+			panic("upvalue index too large")
+		}
+		cl := newGoClosure(f, n)
+		newTop := len(L.stack) - n
+		for n > 0 {
+			n--
+			cl.upvalue[n] = L.stack[newTop+n]
+			L.stack[newTop+n] = nil
+		}
+		L.stack = L.stack[:newTop]
+		L.stackPush(cl)
+	}
 }
 
 func (L *luaState) PushBoolean(b bool) {
@@ -370,7 +392,22 @@ func (L *luaState) Call(nArgs, nResults int) {
 
 func (L *luaState) Load(reader io.Reader, chunkName, mode string) int {
 	if proto, err := binary.Undump(reader); err == nil {
-		L.stackPush(newLuaClosure(proto))
+		cl := newLuaClosure(proto)
+		L.stackPush(cl)
+		/* fill a closure with new closed upvalues */
+		for i := range cl.upvals {
+			cl.upvals[i] = &upvalue{
+				level: -1, /* make it closed */
+				value: nil,
+			}
+		}
+		if len(cl.upvals) > 0 { /* does it have an upvalue? */
+			/* get global table from registry */
+			reg := L.lG.lRegistry.(*luaTable)
+			gt := reg.get(lua.Integer(lua.RIDX_GLOBALS))
+			/* set global table as 1st upvalue of 'cl' (may be LUA_ENV) */
+			cl.upvals[0].value = gt
+		}
 	}
 	// @todo
 	return 0
@@ -419,8 +456,8 @@ func (L *luaState) Register(n string, f lua.GoFunction) {
 	L.SetGlobal(n)
 }
 
-func (L *luaState) PushGoFunction(f lua.GoFunction) { // @todo
-	L.stackPush(f)
+func (L *luaState) PushGoFunction(f lua.GoFunction) {
+	L.PushGoClosure(f, 0)
 }
 
 func (L *luaState) IsNil(idx int) bool {
@@ -507,24 +544,13 @@ func (L *luaState) preCall(val luaValue, nArgs, nResults int) bool {
 	var f lua.GoFunction
 	top := len(L.stack)
 	switch cl := val.(type) {
+	case *gClosure:
+		f = cl.f
+		goto GoFunc
 	case lua.GoFunction:
 		f = cl
-		if L.stackLast-top < lua.MINSTACK {
-			L.stackGrow(lua.MINSTACK)
-		}
-		L.ci = &callInfo{
-			cl:         top - nArgs - 1,
-			top:        top + lua.MINSTACK,
-			prev:       L.ci,
-			nResults:   int16(nResults),
-			callStatus: 0,
-		}
-		// @todo hook
-		n := f(L)
-		L.stackCheck(n)
-		L.postCall(len(L.stack)-n, n)
-		return true
-	case *lClosure:
+		goto GoFunc
+	case *lClosure: /* Lua function: prepare its call */
 		p := cl.proto
 		frameSize := int(p.MaxStackSize)
 		if L.stackLast-top < frameSize {
@@ -559,9 +585,25 @@ func (L *luaState) preCall(val luaValue, nArgs, nResults int) bool {
 		// @todo hookmask -> callhook
 		return false
 	default:
-		// @todo Go closure & mt
+		// @todo mt
 		panic(typeError(val, "call"))
 	}
+GoFunc:
+	if L.stackLast-top < lua.MINSTACK {
+		L.stackGrow(lua.MINSTACK)
+	}
+	L.ci = &callInfo{
+		cl:         top - nArgs - 1,
+		top:        top + lua.MINSTACK,
+		prev:       L.ci,
+		nResults:   int16(nResults),
+		callStatus: 0,
+	}
+	// @todo hook
+	n := f(L)
+	L.stackCheck(n)
+	L.postCall(len(L.stack)-n, n)
+	return true
 }
 
 func (L *luaState) postCall(firstResult, nResults int) bool {

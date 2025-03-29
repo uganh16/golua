@@ -109,11 +109,39 @@ func TestLuaFunction(t *testing.T) {
 }
 
 func TestGoFunction(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/hello_world.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
+
 	L := New()
 	L.Register("print", print)
-	L.GetGlobal("print")
-	L.PushInteger(16)
-	L.Call(1, 0)
+	f, err := os.Open(fileName)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	L.Load(f, "", "b")
+	L.Call(0, 0)
+}
+
+func TestClosure(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/test_closure.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
+
+	L := New()
+	L.Register("print", print)
+	f, err := os.Open(fileName)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	L.Load(f, "", "b")
+	L.Call(0, 0)
 }
 
 func printStack(L *luaState) {

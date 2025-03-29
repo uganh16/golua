@@ -5,6 +5,6 @@ import (
 	"github.com/uganh16/golua/pkg/lua"
 )
 
-func NewState() lua.LuaState {
+func NewState() lua.State {
 	return state.New()
 }

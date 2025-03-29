@@ -22,19 +22,35 @@ func (L *luaState) stackPop() luaValue {
 }
 
 func (L *luaState) stackGet(idx int) (luaValue, bool) {
+	ci := L.ci
 	top := len(L.stack)
 	if idx > 0 {
-		if idx > L.ci.top-(L.ci.cl+1) {
+		if idx > ci.top-(ci.cl+1) {
 			panic("unacceptable index")
-		} else if L.ci.cl+idx >= top {
+		} else if ci.cl+idx >= top {
 			return nil, false
 		} else {
-			return L.stack[L.ci.cl+idx], true
+			return L.stack[ci.cl+idx], true
 		}
 	} else if idx == lua.REGISTRYINDEX {
 		return L.lG.lRegistry, true
-	} else { // @todo upvalues
-		if idx == 0 || -idx > top-(L.ci.cl+1) {
+	} else if idx < lua.REGISTRYINDEX { /* upvalues */
+		idx = lua.REGISTRYINDEX - idx
+		if idx > MAXUPVAL+1 {
+			panic("upvalue index too large")
+		}
+		f := L.stack[ci.cl]
+		if _, ok := f.(*lua.GoFunction); ok {
+			return nil, false
+		}
+		cl := f.(*gClosure)
+		if idx <= len(cl.upvalue) {
+			return cl.upvalue[idx-1], true
+		} else {
+			return nil, false
+		}
+	} else { /* negative index */
+		if idx == 0 || -idx > top-(ci.cl+1) {
 			panic("invalid index")
 		}
 		return L.stack[top+idx], true
@@ -42,18 +58,31 @@ func (L *luaState) stackGet(idx int) (luaValue, bool) {
 }
 
 func (L *luaState) stackSet(idx int, val luaValue) {
+	ci := L.ci
 	top := len(L.stack)
 	if idx > 0 {
-		if idx > L.ci.top-(L.ci.cl+1) {
+		if idx > ci.top-(ci.cl+1) {
 			panic("unacceptable index")
-		} else if L.ci.cl+idx >= top {
+		} else if ci.cl+idx >= top {
 			panic("invalid index")
 		} else {
-			L.stack[L.ci.cl+idx] = val
+			L.stack[ci.cl+idx] = val
 		}
 	} else if idx == lua.REGISTRYINDEX {
 		L.lG.lRegistry = val
-	} else { // @todo upvalues
+	} else if idx < lua.REGISTRYINDEX { /* upvalues */
+		idx = lua.REGISTRYINDEX - idx
+		if idx > MAXUPVAL+1 {
+			panic("upvalue index too large")
+		}
+		if cl, ok := L.stack[ci.cl].(*gClosure); ok {
+			if idx <= len(cl.upvalue) {
+				cl.upvalue[idx-1] = val
+				return
+			}
+		}
+		panic("invalid index")
+	} else { /* negative index */
 		if idx == 0 || -idx > top {
 			panic("invalid index")
 		}

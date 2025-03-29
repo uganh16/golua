@@ -68,7 +68,7 @@ type Proto struct {
 }
 
 type Upvalue struct {
-	InStack byte
+	InStack bool
 	Idx     byte
 }
 

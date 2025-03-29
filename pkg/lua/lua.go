@@ -20,6 +20,10 @@ const MULTRET = -1
 /* pseudo-indices */
 const REGISTRYINDEX = -conf.LUAI_MAXSTACK - 1000
 
+func UpvalueIndex(i int) int {
+	return REGISTRYINDEX - i
+}
+
 type Type int
 
 /**
@@ -123,6 +127,7 @@ type State interface {
 	PushNumber(n Number)
 	PushInteger(i Integer)
 	PushString(s string)
+	PushGoClosure(f GoFunction, n int)
 	PushBoolean(b bool)
 
 	/**

@@ -41,13 +41,21 @@ newFrame:
 				L.setR(a, nil)
 				b--
 			}
-		case bytecode.OP_GETUPVAL:
-		case bytecode.OP_GETTABUP:
+		case bytecode.OP_GETUPVAL: /* R(A) := UpValue[B] */
+			a, b, _ := i.ABC()
+			L.setR(a, cl.upvals[b].get(L))
+		case bytecode.OP_GETTABUP: /* R(A) := UpValue[B][RK(C)] */
+			a, b, c := i.ABC()
+			L.setR(a, L.getTable(cl.upvals[b].get(L), L.getRK(c)))
 		case bytecode.OP_GETTABLE: /* R(A) := R(B)[RK(C)] */
 			a, b, c := i.ABC()
 			L.setR(a, L.getTable(L.getR(b), L.getRK(c)))
-		case bytecode.OP_SETTABUP:
-		case bytecode.OP_SETUPVAL:
+		case bytecode.OP_SETTABUP: /* UpValue[A][RK(B)] := RK(C) */
+			a, b, c := i.ABC()
+			L.setTable(cl.upvals[a].get(L), L.getRK(b), L.getRK(c))
+		case bytecode.OP_SETUPVAL: /* UpValue[B] := R(A) */
+			a, b, _ := i.ABC()
+			cl.upvals[b].set(L, L.getR(a))
 		case bytecode.OP_SETTABLE: /* R(A)[RK(B)] := RK(C) */
 			a, b, c := i.ABC()
 			L.setTable(L.getR(a), L.getRK(b), L.getRK(c))
@@ -94,7 +102,7 @@ newFrame:
 			a, sbx := i.AsBx()
 			ci.pc += sbx
 			if a != 0 {
-				panic("todo!")
+				L.closeUpvalues(base + a - 1)
 			}
 		case bytecode.OP_EQ: /* if ((RK(B) == RK(C)) ~= A) then pc++ */
 			a, b, c := i.ABC()
@@ -131,9 +139,8 @@ newFrame:
 			} /* (!) else previous instruction set top */
 			if L.preCall(L.getR(a), len(L.stack)-(base+a)-1, nResults) { /* Go function? */
 				if nResults >= 0 {
-					// @todo adjust results
+					L.stack = L.stack[:ci.top] /* adjust results */
 				}
-				// @todo update 'base'
 			} else { /* Lua function */
 				ci = L.ci
 				goto newFrame
@@ -150,7 +157,9 @@ newFrame:
 			}
 		case bytecode.OP_RETURN: /* return R(A), ... ,R(A+B-2) */
 			a, b, _ := i.ABC()
-			// @todo luaF_close(L, base)
+			if len(cl.proto.Protos) > 0 {
+				L.closeUpvalues(base)
+			}
 			firstResult := base + a
 			var nResults int
 			if b != 0 {
@@ -208,7 +217,16 @@ newFrame:
 			L.stack = L.stack[:ci.top] /* correct top (in case of previous open call) */
 		case bytecode.OP_CLOSURE: /* R(A) := closure(KPROTO[Bx]) */
 			a, bx := i.ABx()
-			L.setR(a, newLuaClosure(cl.proto.Protos[bx]))
+			p := cl.proto.Protos[bx]
+			ncl := newLuaClosure(p)
+			L.setR(a, ncl)
+			for i, uv := range p.Upvalues { /* fill in its upvalues */
+				if uv.InStack { /* upvalue refers to local variable? */
+					ncl.upvals[i] = L.findUpvalue(base + int(uv.Idx))
+				} else { /* get upvalue from enclosing function */
+					ncl.upvals[i] = cl.upvals[uv.Idx]
+				}
+			}
 		case bytecode.OP_VARARG: /* R(A), R(A+1), ..., R(A+B-2) = vararg */
 			a, b, _ := i.ABC()
 			nResults := b - 1 /* required results */
