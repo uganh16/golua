@@ -46,19 +46,19 @@ newFrame:
 			L.setR(a, cl.upvals[b].get(L))
 		case bytecode.OP_GETTABUP: /* R(A) := UpValue[B][RK(C)] */
 			a, b, c := i.ABC()
-			L.setR(a, L.getTable(cl.upvals[b].get(L), L.getRK(c)))
+			L.setR(a, L.getTable(cl.upvals[b].get(L), L.getRK(c), false))
 		case bytecode.OP_GETTABLE: /* R(A) := R(B)[RK(C)] */
 			a, b, c := i.ABC()
-			L.setR(a, L.getTable(L.getR(b), L.getRK(c)))
+			L.setR(a, L.getTable(L.getR(b), L.getRK(c), false))
 		case bytecode.OP_SETTABUP: /* UpValue[A][RK(B)] := RK(C) */
 			a, b, c := i.ABC()
-			L.setTable(cl.upvals[a].get(L), L.getRK(b), L.getRK(c))
+			L.setTable(cl.upvals[a].get(L), L.getRK(b), L.getRK(c), false)
 		case bytecode.OP_SETUPVAL: /* UpValue[B] := R(A) */
 			a, b, _ := i.ABC()
 			cl.upvals[b].set(L, L.getR(a))
 		case bytecode.OP_SETTABLE: /* R(A)[RK(B)] := RK(C) */
 			a, b, c := i.ABC()
-			L.setTable(L.getR(a), L.getRK(b), L.getRK(c))
+			L.setTable(L.getR(a), L.getRK(b), L.getRK(c), false)
 		case bytecode.OP_NEWTABLE: /* R(A) := {} (size = B,C) */
 			a, b, c := i.ABC()
 			L.setR(a, newLuaTable(number.Fb2int(b), number.Fb2int(c)))
@@ -67,7 +67,7 @@ newFrame:
 			key := L.getRK(c).(string) /* key must be a string */
 			t := L.getR(b)
 			L.setR(a+1, t)
-			L.setR(a, L.getTable(t, key))
+			L.setR(a, L.getTable(t, key, false))
 		case
 			bytecode.OP_ADD,  /* R(A) := RK(B) + RK(C) */
 			bytecode.OP_SUB,  /* R(A) := RK(B) - RK(C) */
@@ -82,22 +82,22 @@ newFrame:
 			bytecode.OP_SHL,  /* R(A) := RK(B) << RK(C) */
 			bytecode.OP_SHR:  /* R(A) := RK(B) >> RK(C) */
 			a, b, c := i.ABC()
-			L.setR(a, _arith(L.getRK(b), L.getRK(c), lua.ArithOp(opcode-bytecode.OP_ADD)))
+			L.setR(a, _arith(L, lua.ArithOp(opcode-bytecode.OP_ADD), L.getRK(b), L.getRK(c)))
 		case
 			bytecode.OP_UNM,  /* R(A) := -R(B) */
 			bytecode.OP_BNOT: /* R(A) := ~R(B) */
 			a, b, _ := i.ABC()
 			val := L.getR(b)
-			L.setR(a, _arith(val, val, lua.ArithOp(opcode-bytecode.OP_ADD)))
+			L.setR(a, _arith(L, lua.ArithOp(opcode-bytecode.OP_ADD), val, val))
 		case bytecode.OP_NOT: /* R(A) := not R(B) */
 			a, b, _ := i.ABC()
 			L.setR(a, !toBoolean(L.getR(b)))
 		case bytecode.OP_LEN: /* R(A) := length of R(B) */
 			a, b, _ := i.ABC()
-			L.setR(a, _len(L.getR(b)))
+			L.setR(a, _len(L, L.getR(b)))
 		case bytecode.OP_CONCAT: /* R(A) := R(B).. ... ..R(C) */
 			a, b, c := i.ABC()
-			L.setR(a, _concat(L.stack[base+b:base+c+1]))
+			L.setR(a, _concat(L, L.stack[base+b:base+c+1]))
 		case bytecode.OP_JMP: /* pc+=sBx; if (A) close all upvalues >= R(A - 1) */
 			a, sbx := i.AsBx()
 			ci.pc += sbx
@@ -106,17 +106,17 @@ newFrame:
 			}
 		case bytecode.OP_EQ: /* if ((RK(B) == RK(C)) ~= A) then pc++ */
 			a, b, c := i.ABC()
-			if _eq(L.getRK(b), L.getRK(c)) != (a != 0) {
+			if _eq(L, L.getRK(b), L.getRK(c)) != (a != 0) {
 				ci.pc++
 			}
 		case bytecode.OP_LT: /* if ((RK(B) <  RK(C)) ~= A) then pc++ */
 			a, b, c := i.ABC()
-			if _lt(L.getRK(b), L.getRK(c)) != (a != 0) {
+			if _lt(L, L.getRK(b), L.getRK(c)) != (a != 0) {
 				ci.pc++
 			}
 		case bytecode.OP_LE: /* if ((RK(B) <= RK(C)) ~= A) then pc++ */
 			a, b, c := i.ABC()
-			if _le(L.getRK(b), L.getRK(c)) != (a != 0) {
+			if _le(L, L.getRK(b), L.getRK(c)) != (a != 0) {
 				ci.pc++
 			}
 		case bytecode.OP_TEST: /* if not (R(A) <=> C) then pc++ */
@@ -182,11 +182,11 @@ newFrame:
 			initial := L.getR(a)
 			limit := L.getR(a + 1)
 			step := L.getR(a + 2)
-			initial = _arith(initial, step, lua.OPADD)
+			initial = _arith(L, lua.OPADD, initial, step)
 			L.setR(a, initial)
 			if step, ok := toNumber(step); ok {
-				if step >= 0 && _le(initial, limit) ||
-					step < 0 && _le(limit, initial) {
+				if step >= 0 && _le(L, initial, limit) ||
+					step < 0 && _le(L, limit, initial) {
 					ci.pc += sbx
 					L.setR(a+3, initial)
 				}
@@ -195,7 +195,7 @@ newFrame:
 			}
 		case bytecode.OP_FORPREP: /* R(A)-=R(A+2); pc+=sBx */
 			a, sbx := i.AsBx()
-			L.setR(a, _arith(L.getR(a), L.getR(a+2), lua.OPSUB))
+			L.setR(a, _arith(L, lua.OPSUB, L.getR(a), L.getR(a+2)))
 			ci.pc += sbx
 		case bytecode.OP_TFORCALL:
 		case bytecode.OP_TFORLOOP:

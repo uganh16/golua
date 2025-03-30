@@ -7,8 +7,7 @@ import (
 type runtimeError string
 
 func typeError(val luaValue, op string) runtimeError {
-	t := typeNames[typeOf(val)+1]                                             // @todo tm
-	return runtimeError(fmt.Sprintf("attempt to %s a %s value%s", op, t, "")) // @todo varinfo
+	return runtimeError(fmt.Sprintf("attempt to %s a %s value%s", op, typeName(val), "")) // @todo varinfo
 }
 
 func concatError(val1, val2 luaValue) runtimeError {
@@ -33,8 +32,8 @@ func toIntError(val1, val2 luaValue) runtimeError {
 }
 
 func orderError(val1, val2 luaValue) runtimeError {
-	t1 := typeNames[typeOf(val1)+1] // @todo tm
-	t2 := typeNames[typeOf(val2)+1] // @todo tm
+	t1 := typeName(val1)
+	t2 := typeName(val2)
 	if t1 == t2 {
 		return runtimeError(fmt.Sprintf("attempt to compare two %s values", t1))
 	} else {

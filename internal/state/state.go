@@ -9,6 +9,9 @@ import (
 	"github.com/uganh16/golua/pkg/lua"
 )
 
+/* limit for table tag-method chains (to avoid loops) */
+const MAXTAGLOOP = 2000
+
 /* test for pseudo index */
 func isPseudo(idx int) bool {
 	return idx <= lua.REGISTRYINDEX
@@ -49,6 +52,7 @@ const (
 
 type global_State struct {
 	lRegistry luaValue
+	mt        [lua.NUMTAGS]*luaTable
 }
 
 type luaState struct {
@@ -243,6 +247,17 @@ func (L *luaState) ToStringX(idx int) (string, bool) {
 	return str, ok
 }
 
+func (L *luaState) RawLen(idx int) int {
+	val, _ := L.stackGet(idx)
+	if s, ok := val.(string); ok {
+		return len(s)
+	} else if t, ok := val.(*luaTable); ok {
+		return t.len()
+	} else {
+		return 0
+	}
+}
+
 func (L *luaState) ToGoFunction(idx int) lua.GoFunction {
 	val, _ := L.stackGet(idx)
 	if f, ok := val.(lua.GoFunction); ok {
@@ -262,7 +277,13 @@ func (L *luaState) Arith(op lua.ArithOp) {
 	} else {
 		a = b
 	}
-	L.stackPush(_arith(a, b, op))
+	L.stackPush(_arith(L, op, a, b))
+}
+
+func (L *luaState) RawEqual(idx1, idx2 int) bool {
+	a, ok1 := L.stackGet(idx1)
+	b, ok2 := L.stackGet(idx2)
+	return ok1 && ok2 && _eq(nil, a, b)
 }
 
 func (L *luaState) Compare(idx1, idx2 int, op lua.CompareOp) bool {
@@ -273,11 +294,11 @@ func (L *luaState) Compare(idx1, idx2 int, op lua.CompareOp) bool {
 	}
 	switch op {
 	case lua.OPEQ:
-		return _eq(a, b)
+		return _eq(L, a, b)
 	case lua.OPLT:
-		return _lt(a, b)
+		return _lt(L, a, b)
 	case lua.OPLE:
-		return _le(a, b)
+		return _le(L, a, b)
 	default:
 		panic(fmt.Sprintf("invalid compare op: %d", op))
 	}
@@ -325,52 +346,100 @@ func (L *luaState) PushBoolean(b bool) {
 
 func (L *luaState) GetGlobal(name string) lua.Type {
 	reg := L.lG.lRegistry.(*luaTable)
-	return L.getTableAux(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name)
+	return L.getTableAux(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name, false)
 }
 
 func (L *luaState) GetTable(idx int) lua.Type {
 	t, _ := L.stackGet(idx)
 	k := L.stackPop() // @todo do not pop?
-	return L.getTableAux(t, k)
+	return L.getTableAux(t, k, false)
 }
 
 func (L *luaState) GetField(idx int, k string) lua.Type {
 	t, _ := L.stackGet(idx)
-	return L.getTableAux(t, k)
+	return L.getTableAux(t, k, false)
 }
 
 func (L *luaState) GetI(idx int, n lua.Integer) lua.Type {
 	t, _ := L.stackGet(idx)
-	return L.getTableAux(t, n)
+	return L.getTableAux(t, n, false)
+}
+
+func (L *luaState) RawGet(idx int) lua.Type {
+	t, _ := L.stackGet(idx)
+	k := L.stackPop()
+	return L.getTableAux(t, k, true)
+}
+
+func (L *luaState) RawGetI(idx int, n lua.Integer) lua.Type {
+	t, _ := L.stackGet(idx)
+	return L.getTableAux(t, n, true)
 }
 
 func (L *luaState) CreateTable(nArr, nRec int) {
 	L.stackPush(newLuaTable(nArr, nRec))
 }
 
+func (L *luaState) GetMetatable(idx int) bool {
+	val, _ := L.stackGet(idx)
+	if mt := L.getMetatable(val); mt != nil {
+		L.stackPush(mt)
+		return true
+	}
+	return false
+}
+
 func (L *luaState) SetGlobal(name string) {
 	reg := L.lG.lRegistry.(*luaTable)
 	v := L.stackPop()
-	L.setTable(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name, v)
+	L.setTable(reg.get(lua.Integer(lua.RIDX_GLOBALS)), name, v, false)
 }
 
 func (L *luaState) SetTable(idx int) {
 	t, _ := L.stackGet(idx)
 	v := L.stackPop()
 	k := L.stackPop()
-	L.setTable(t, k, v)
+	L.setTable(t, k, v, false)
 }
 
 func (L *luaState) SetField(idx int, k string) {
 	t, _ := L.stackGet(idx)
 	v := L.stackPop()
-	L.setTable(t, k, v)
+	L.setTable(t, k, v, false)
 }
 
 func (L *luaState) SetI(idx int, n lua.Integer) {
 	t, _ := L.stackGet(idx)
 	v := L.stackPop()
-	L.setTable(t, n, v)
+	L.setTable(t, n, v, false)
+}
+
+func (L *luaState) RawSet(idx int) {
+	t, _ := L.stackGet(idx)
+	v := L.stackPop()
+	k := L.stackPop()
+	L.setTable(t, k, v, true)
+}
+
+func (L *luaState) RawSetI(idx int, n lua.Integer) {
+	t, _ := L.stackGet(idx)
+	v := L.stackPop()
+	L.setTable(t, n, v, true)
+}
+
+func (L *luaState) SetMetatable(idx int) bool {
+	val, _ := L.stackGet(idx)
+	var mt *luaTable
+	switch t := L.stackPop().(type) {
+	case nil:
+		mt = nil
+	case *luaTable:
+		mt = t
+	default:
+		panic("table expected")
+	}
+	L.setMetatable(val, mt)
+	return true
 }
 
 func (L *luaState) Call(nArgs, nResults int) {
@@ -382,9 +451,7 @@ func (L *luaState) Call(nArgs, nResults int) {
 	}
 	f, _ := L.stackGet(-(nArgs + 1))
 	// @todo need to prepare continuation?
-	if !L.preCall(f, nArgs, nResults) { // --> luaD_callnoyield
-		L.execute()
-	}
+	L.doCall(f, nArgs, nResults)
 	if nResults == lua.MULTRET && L.ci.top < len(L.stack) {
 		L.ci.top = len(L.stack)
 	}
@@ -419,7 +486,7 @@ func (L *luaState) Concat(n int) {
 		L.stackPush("")
 	} else if n >= 2 {
 		top := len(L.stack)
-		res := _concat(L.stack[top-n : top])
+		res := _concat(L, L.stack[top-n:top])
 		for i := 1; i <= n; i++ {
 			L.stack[top-i] = nil
 		}
@@ -430,7 +497,7 @@ func (L *luaState) Concat(n int) {
 
 func (L *luaState) Len(idx int) {
 	val, _ := L.stackGet(idx)
-	L.stackPush(_len(val))
+	L.stackPush(_len(L, val))
 }
 
 func (L *luaState) ToNumber(idx int) lua.Number {
@@ -477,12 +544,7 @@ func (L *luaState) IsNoneOrNil(idx int) bool {
 }
 
 func (L *luaState) PushGlobalTable() {
-	// @todo use RawGetI
-	t, _ := L.stackGet(lua.REGISTRYINDEX)
-	if t, ok := t.(*luaTable); ok {
-		L.stackPush(t.get(lua.Integer(lua.RIDX_GLOBALS)))
-	}
-	panic("table expected")
+	L.RawGetI(lua.REGISTRYINDEX, lua.RIDX_GLOBALS)
 }
 
 func (L *luaState) ToString(idx int) string {
@@ -519,25 +581,73 @@ func (L *luaState) protectedRun(f func()) (ok bool) {
 	return true
 }
 
-func (L *luaState) getTable(t, k luaValue) luaValue {
-	if t, ok := t.(*luaTable); ok {
-		return t.get(k)
-	}
-	panic(typeError(t, "index"))
-}
-
-func (L *luaState) getTableAux(t, k luaValue) lua.Type {
-	v := L.getTable(t, k)
+func (L *luaState) getTableAux(t, k luaValue, raw bool) lua.Type {
+	v := L.getTable(t, k, raw)
 	L.stackPush(v)
 	return typeOf(v)
 }
 
-func (L *luaState) setTable(t, k, v luaValue) {
-	if t, ok := t.(*luaTable); ok {
-		t.set(k, v)
-		return
+func (L *luaState) getTable(t, k luaValue, raw bool) luaValue {
+	for loop := 0; loop <= MAXTAGLOOP; loop++ {
+		var tm luaValue /* metamethod */
+		switch t := t.(type) {
+		case *luaTable: /* 't' is a table */
+			v := t.get(k)
+			if v == nil && !raw && t.__mt != nil {
+				tm = t.__mt.get("__index") /* table's metamethod */
+			}
+			if tm == nil { /* no metamethod? */
+				return v
+			}
+			/* else will try the metamethod */
+		default:
+			if raw {
+				panic("table expected")
+			}
+			tm = L.getMetafield(t, "__index")
+			if tm == nil {
+				panic(typeError(t, "index"))
+			}
+			/* else will try the metamethod */
+		}
+		if typeOf(tm) == lua.TFUNCTION { /* is metamethod a function? */
+			return L.callTM(tm, t, k) /* call it */
+		}
+		t = tm /* else try to access 'tm[k]' */
 	}
-	panic(typeError(t, "index"))
+	panic(runtimeError("'__index' chain too long; possible loop"))
+}
+
+func (L *luaState) setTable(t, k, v luaValue, raw bool) {
+	for loop := 0; loop <= MAXTAGLOOP; loop++ {
+		var tm luaValue /* '__newindex' metamethod */
+		switch t := t.(type) {
+		case *luaTable: /* 't' is a table */
+			if v := t.get(k); v == nil && !raw && t.__mt != nil {
+				tm = t.__mt.get("__newindex") /* table's metamethod */
+			}
+			if tm == nil { /* no metamethod? */
+				t.set(k, v)
+				return
+			}
+			/* else will try the metamethod */
+		default:
+			if raw {
+				panic("table expected")
+			}
+			tm = L.getMetafield(t, "__newindex")
+			if tm == nil {
+				panic(typeError(t, "index"))
+			}
+		}
+		/* try the metamethod */
+		if typeOf(tm) == lua.TFUNCTION {
+			L.callTM(tm, t, k, v)
+			return
+		}
+		t = tm /* else repeat assignment over 'tm' */
+	}
+	panic(runtimeError("'__newindex' chain too long; possible loop"))
 }
 
 func (L *luaState) preCall(val luaValue, nArgs, nResults int) bool {
@@ -584,9 +694,19 @@ func (L *luaState) preCall(val luaValue, nArgs, nResults int) bool {
 		}
 		// @todo hookmask -> callhook
 		return false
-	default:
-		// @todo mt
-		panic(typeError(val, "call"))
+	default: /* not a function */
+		if L.stackLast-top < 1 { /* ensure space for metamethod */
+			L.stackGrow(1)
+		}
+		tm := L.getMetafield(val, "__call")
+		if typeOf(tm) != lua.TFUNCTION {
+			panic(typeError(val, "call"))
+		}
+		L.stack = L.stack[:top+1]
+		/* open a hole inside the stack */
+		copy(L.stack[top-nArgs:], L.stack[top-nArgs-1:top])
+		L.stack[top-nArgs-1] = tm /* tag method is the new function to be called */
+		return L.preCall(tm, nArgs+1, nResults)
 	}
 GoFunc:
 	if L.stackLast-top < lua.MINSTACK {
@@ -627,4 +747,13 @@ func (L *luaState) postCall(firstResult, nResults int) bool {
 	}
 	L.stack = L.stack[:ci.cl+wanted]
 	return true
+}
+
+func (L *luaState) doCall(f luaValue, nArgs, nResults int) { // --> luaD_callnoyield
+	// @todo L->nny++
+	// @todo luaD_call
+	if !L.preCall(f, nArgs, nResults) {
+		L.execute()
+	}
+	// @todo L->nny--
 }

@@ -112,12 +112,14 @@ type State interface {
 	ToIntegerX(idx int) (Integer, bool)
 	ToBoolean(idx int) bool
 	ToStringX(idx int) (string, bool)
+	RawLen(idx int) int
 	ToGoFunction(idx int) GoFunction
 
 	/**
 	 * comparison and arithmetic functions
 	 */
 	Arith(op ArithOp)
+	RawEqual(idx1, idx2 int) bool
 	Compare(idx1, idx2 int, op CompareOp) bool
 
 	/**
@@ -138,8 +140,11 @@ type State interface {
 	GetTable(idx int) Type
 	GetField(idx int, k string) Type
 	GetI(idx int, n Integer) Type
+	RawGet(idx int) Type
+	RawGetI(idx int, n Integer) Type
 
 	CreateTable(nArr, nRec int)
+	GetMetatable(idx int) bool
 
 	/**
 	 * set functions (stack -> Lua)
@@ -148,6 +153,9 @@ type State interface {
 	SetTable(idx int)
 	SetField(idx int, k string)
 	SetI(idx int, n Integer)
+	RawSet(idx int)
+	RawSetI(idx int, n Integer)
+	SetMetatable(idx int) bool
 
 	/**
 	 * 'load' and 'call' functions (load and run Lua code)

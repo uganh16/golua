@@ -144,6 +144,26 @@ func TestClosure(t *testing.T) {
 	L.Call(0, 0)
 }
 
+func TestMetatable(t *testing.T) {
+	fileName := filepath.Join(os.TempDir(), "luac.out")
+	cmd := exec.Command("luac", "-o", fileName, "../../test/vector2.lua")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Error running command: %v", err)
+	}
+
+	L := New()
+	L.Register("print", print)
+	L.Register("getmetatable", getMetatable)
+	L.Register("setmetatable", setMetatable)
+	f, err := os.Open(fileName)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	L.Load(f, "", "b")
+	L.Call(0, 0)
+}
+
 func printStack(L *luaState) {
 	for idx := 1; idx <= L.GetTop(); idx++ {
 		t := L.Type(idx)
@@ -177,4 +197,16 @@ func print(L lua.State) int {
 	}
 	fmt.Println()
 	return 0
+}
+
+func getMetatable(L lua.State) int {
+	if !L.GetMetatable(1) {
+		L.PushNil()
+	}
+	return 1
+}
+
+func setMetatable(L lua.State) int {
+	L.SetMetatable(1)
+	return 1
 }
